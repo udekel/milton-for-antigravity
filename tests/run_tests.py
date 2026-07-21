@@ -285,7 +285,7 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
 
         intervention = plugin.on_pre_tool_call("run_command", {"CommandLine": "make"}, step_idx=1)
         self.assertIsNotNone(intervention)
-        self.assertEqual(intervention["decision"], "force_ask")
+        self.assertEqual(intervention["decision"], "ask")
         self.assertIn("[Milton Rationale", intervention["reason"])
         self.assertNotIn("🔍", intervention["reason"])
 

@@ -116,7 +116,7 @@ class MiltonAntigravityPlugin:
                 else:
                     explanation_text = f"[Milton Rationale (Offline - Could not connect to Milton Server)]\nNeeded to execute tool '{tool_name}' to proceed with task."
                 return {
-                    "decision": "force_ask",
+                    "decision": "ask",
                     "reason": explanation_text,
                     "injected_message": explanation_text
                 }

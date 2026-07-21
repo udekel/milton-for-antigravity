@@ -151,56 +151,36 @@ def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
 
 
 def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires BEFORE tool execution. Hardcoded test rationale as requested."""
+    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale, returning decision='ask' to defer to user modal."""
     tool_call = payload.get("toolCall", {})
     tool_name = tool_call.get("name", "unknown_tool")
+    tool_args = tool_call.get("args", {})
+    transcript_path = payload.get("transcriptPath", "")
+
     log_event(f"Handling PreToolUse for tool '{tool_name}' in session '{session_id}'")
 
-    hardcoded_text = (
-        "[Milton Rationale (Hardcoded Test Output)]\n"
+    # Sync recent transcript fragments to local Milton server if present
+    sync_transcript_to_milton_server(session_id, transcript_path)
+
+    # Attempt to fetch explanation rationale from local Milton server
+    encoded_tool = urllib.parse.quote(tool_name)
+    res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={encoded_tool}")
+
+    if res and "explanation" in res:
+        rationale = res["explanation"]
+    else:
+        # Robust fallback: extract rationale locally from transcript or tool signature
+        rationale = extract_mutterings_rationale_from_transcript(transcript_path, tool_name, tool_args)
+
+    reason_text = (
+        f"[Milton Rationale]\n"
         f"Tool Target: {tool_name}\n"
-        "Permission requested to complete workspace objective."
+        f"Rationale: {rationale}"
     )
 
     return {
-        "decision": "force_ask",
-        "reason": hardcoded_text,
-        "message": hardcoded_text,
-        "injected_message": hardcoded_text,
-        "user_message": hardcoded_text,
-        "injectSteps": [
-            {
-                "ephemeralMessage": hardcoded_text
-            },
-            {
-                "userMessage": hardcoded_text
-            }
-        ]
-    }
-
-
-def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires at turn completion. Hardcoded test summary as requested."""
-    log_event(f"Handling PostInvocation for session '{session_id}'")
-
-    hardcoded_summary = (
-        "[Milton Summary of Mutterings (Hardcoded Test Output)]\n"
-        "Completed turn actions."
-    )
-
-    return {
-        "injectSteps": [
-            {
-                "userMessage": hardcoded_summary
-            },
-            {
-                "ephemeralMessage": hardcoded_summary
-            }
-        ],
-        "summary": hardcoded_summary,
-        "userMessage": hardcoded_summary,
-        "message": hardcoded_summary,
-        "terminationBehavior": ""
+        "decision": "ask",
+        "reason": reason_text
     }
 
 
