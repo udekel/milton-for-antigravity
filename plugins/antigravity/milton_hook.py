@@ -2,15 +2,19 @@
 """Milton JSON Hook Executor for Jetski / Antigravity harness.
 
 This script is invoked directly by Jetski via hooks.json.
-It receives JSON arguments on stdin and outputs JSON hook results on stdout.
+It connects to the local Milton Agent Backend API (http://127.0.0.1:8000)
+to stream event fragments, fetch summaries, and request rationale explanations.
 """
 
 import json
 import os
 import sys
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+API_URL = os.getenv("MILTON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 LOG_FILE = "/tmp/milton_hook.log"
 
 
@@ -22,109 +26,117 @@ def log_event(msg: str):
         pass
 
 
-def read_transcript_mutterings(transcript_path: str) -> List[Dict[str, Any]]:
-    """Reads the current conversation transcript JSONL file to extract model thoughts and actions."""
-    if not transcript_path or not os.path.exists(transcript_path):
-        log_event(f"Transcript path not found or invalid: {transcript_path}")
-        return []
+def http_post(path: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    url = f"{API_URL}{path}"
+    try:
+        data_bytes = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data_bytes, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status == 200:
+                return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        log_event(f"HTTP POST {path} error: {e}")
+    return None
 
-    mutterings = []
+
+def http_get(path: str) -> Optional[Dict[str, Any]]:
+    url = f"{API_URL}{path}"
+    try:
+        req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status == 200:
+                return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        log_event(f"HTTP GET {path} error: {e}")
+    return None
+
+
+def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
+    """Reads trajectory transcript log file and syncs recent fragments to local Milton server."""
+    if not transcript_path or not os.path.exists(transcript_path):
+        return
+
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if entry.get("type") in ("PLANNER_RESPONSE", "MODEL"):
-                        content = entry.get("content", "")
-                        tool_calls = entry.get("tool_calls", [])
-                        mutterings.append({
-                            "content": content,
-                            "tool_calls": tool_calls,
-                            "step_index": entry.get("step_index")
+            lines = [l.strip() for l in f if l.strip()]
+
+        for line in lines[-5:]:
+            try:
+                entry = json.loads(line)
+                step_type = entry.get("type")
+                if step_type in ("PLANNER_RESPONSE", "MODEL"):
+                    content = entry.get("content")
+                    if content:
+                        http_post(f"/api/v1/session/{session_id}/fragment", {
+                            "type": "muttering",
+                            "content": content
                         })
-                except Exception:
-                    continue
+                    for tc in entry.get("tool_calls", []):
+                        if isinstance(tc, dict):
+                            http_post(f"/api/v1/session/{session_id}/fragment", {
+                                "type": "pre_tool_call",
+                                "tool_name": tc.get("name") or tc.get("type", "tool"),
+                                "args": tc.get("args")
+                            })
+            except Exception:
+                continue
     except Exception as e:
-        log_event(f"Error reading transcript: {e}")
-
-    return mutterings
+        log_event(f"Transcript sync error: {e}")
 
 
-def generate_summary(payload: Dict[str, Any], prefix: str = "") -> str:
-    """Generates a Milton Mutterings Summary from current trajectory transcript."""
-    transcript_path = payload.get("transcriptPath", "")
-    mutterings = read_transcript_mutterings(transcript_path)
-
-    recent_thoughts = []
-    recent_tools = []
-
-    for m in mutterings[-5:]:
-        if m.get("content"):
-            text = m["content"].strip()
-            if len(text) > 120:
-                text = text[:120] + "..."
-            recent_thoughts.append(text)
-        for tc in m.get("tool_calls", []):
-            if isinstance(tc, dict):
-                recent_tools.append(tc.get("name") or tc.get("type", "tool"))
-
-    summary_text = (
-        f"{prefix}\n"
-        "📌 [MILTON MUTTERINGS SUMMARY]\n"
-        f"• Stream of Thought Turns Processed: {len(mutterings)}\n"
-        f"• Actions Executed: {', '.join(set(recent_tools)) if recent_tools else 'General Reasoning'}\n"
-    )
-    if recent_thoughts:
-        summary_text += f"• Latest Monologue: \"{recent_thoughts[-1]}\"\n"
-    else:
-        summary_text += "• Latest Monologue: Analyzing user request...\n"
-
-    return summary_text
-
-
-def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires BEFORE tool execution and BEFORE permission prompt is rendered!"""
+def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fires BEFORE tool execution. Queries Milton server for permission rationale explanation."""
     tool_call = payload.get("toolCall", {})
     tool_name = tool_call.get("name", "")
     tool_args = tool_call.get("args", {})
-    log_event(f"Handling PreToolUse hook for tool: {tool_name}")
+    log_event(f"Handling PreToolUse for tool '{tool_name}' in session '{session_id}'")
 
-    summary_context = generate_summary(payload, prefix="🔍 [Milton Rationale before permission prompt]:")
-    
-    reason_msg = (
-        f"{summary_context}\n"
-        f"⚠️ MILTON SAFETY ANALYSIS: Agent requested tool '{tool_name}' with args {tool_args}. "
-        f"Prior mutterings show it intends to inspect workspace/system environment."
-    )
+    # Send fragment to local server
+    http_post(f"/api/v1/session/{session_id}/fragment", {
+        "type": "pre_tool_call",
+        "tool_name": tool_name,
+        "args": tool_args
+    })
 
-    # Force Ask with explicit reason injection into permission modal
+    # Query server for permission explanation
+    encoded_args = urllib.parse.quote(json.dumps(tool_args))
+    res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
+
+    if res and "explanation" in res:
+        explanation_text = f"🔍 [Milton Server Rationale]: {res['explanation']}"
+    else:
+        explanation_text = f"🔍 [Milton Standby]: Tool '{tool_name}' execution requested."
+
     return {
         "decision": "force_ask",
-        "reason": reason_msg
+        "reason": explanation_text
     }
 
 
-def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires before model invocation."""
-    log_event("Handling PreInvocation hook")
-    summary_text = generate_summary(payload)
+def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fires at turn completion. Fetches server-generated summary and injects into UI."""
+    log_event(f"Handling PostInvocation for session '{session_id}'")
+    transcript_path = payload.get("transcriptPath", "")
 
-    return {
-        "injectSteps": [
-            {
-                "userMessage": summary_text
-            }
-        ]
-    }
+    # Sync latest trajectory to local Milton server
+    sync_transcript_to_milton_server(session_id, transcript_path)
 
+    # Fetch summary from Milton server
+    res = http_get(f"/api/v1/session/{session_id}/summary")
 
-def handle_post_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires after model invocation completes (at turn completion)."""
-    log_event("Handling PostInvocation hook")
-    summary_text = generate_summary(payload, prefix="🏁 [Milton End-of-Turn Summary]:")
+    if res and "human_summary" in res:
+        actions = ", ".join(res.get("actions_executed", [])) or "General reasoning"
+        summary_text = (
+            "📌 [MILTON SERVER SUMMARY]\n"
+            f"• Human Summary: {res['human_summary']}\n"
+            f"• Actions Executed: {actions}\n"
+            f"• Risk Flags: {len(res.get('risk_flags', []))} detected\n"
+        )
+    else:
+        summary_text = (
+            "📌 [MILTON MUTTERINGS SUMMARY]\n"
+            "• Processed turn mutterings and saved session context to local storage.\n"
+        )
 
     return {
         "injectSteps": [
@@ -136,31 +148,25 @@ def handle_post_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires when turn execution loop terminates."""
-    log_event("Handling Stop hook")
-    return {}
-
-
 def main():
     try:
         input_data = sys.stdin.read()
-        log_event(f"Milton Hook Called with stdin length {len(input_data)}")
-        
+        log_event(f"Milton Hook Called. Input length: {len(input_data)}")
+
         if not input_data:
             json.dump({}, sys.stdout)
             return
 
         payload = json.loads(input_data)
-        
+        session_id = payload.get("conversationId") or payload.get("common", {}).get("conversationId") or "session-default"
+
+        # Ensure session is initialized on local Milton server
+        http_post("/api/v1/session/start", {"session_id": session_id})
+
         if "toolCall" in payload:
-            result = handle_pre_tool_use(payload)
-        elif "executionNum" in payload or "terminationReason" in payload:
-            result = handle_stop(payload)
-        elif "invocationNum" in payload and payload.get("invocationNum", 0) > 0:
-            result = handle_post_invocation(payload)
+            result = handle_pre_tool_use(session_id, payload)
         else:
-            result = handle_pre_invocation(payload)
+            result = handle_post_invocation(session_id, payload)
 
         json.dump(result, sys.stdout)
         sys.stdout.flush()

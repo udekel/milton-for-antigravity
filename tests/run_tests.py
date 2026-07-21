@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Python Unittest Test Suite for Milton Agent Backend."""
+"""Native Python Unittest Test Suite for Milton Agent Backend & Client Plugins."""
 
 import json
 import os
@@ -31,6 +31,8 @@ from app.memory.session_store import SessionStore, get_session_store
 from app.agents.analyzer import MutteringAnalyzerAgent
 from app.agents.explainer import RequestExplainerAgent
 from app.main import MiltonHTTPRequestHandler, HTTPServer
+from plugins.antigravity.plugin import MiltonAntigravityPlugin, MiltonMode
+from plugins.antigravity.milton_hook import handle_pre_tool_use, handle_post_invocation
 
 
 class TestSessionStore(unittest.TestCase):
@@ -120,7 +122,7 @@ class TestAgents(unittest.TestCase):
         self.assertIn(explanation.risk_level, ("low", "medium", "high"))
 
 
-class TestLocalHTTPServer(unittest.TestCase):
+class TestLocalHTTPServerAndPlugins(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -187,6 +189,24 @@ class TestLocalHTTPServer(unittest.TestCase):
             data = json.loads(resp.read().decode())
             self.assertEqual(data["target_tool"], "run_command")
             self.assertIn("run_command", data["explanation"])
+
+    def test_milton_plugin_client_http_communication(self):
+        plugin = MiltonAntigravityPlugin(mode=MiltonMode.SUMMARIZE_EVERYTHING, api_url="http://127.0.0.1:8765")
+        sid = f"session-plugin-test-{int(time.time())}"
+        plugin.on_session_start(sid, ["/workspace"])
+
+        plugin.on_user_prompt("Run test build")
+        plugin.on_muttering("Analyzing build configuration...")
+
+        intervention = plugin.on_pre_tool_call("run_command", {"CommandLine": "make"}, step_idx=1)
+        self.assertIsNotNone(intervention)
+        self.assertEqual(intervention["decision"], "force_ask")
+        self.assertIn("Milton Server", intervention["reason"])
+
+        plugin.on_post_tool_call("run_command", "Build OK")
+        summary_banner = plugin.on_turn_complete("Build completed successfully.")
+        self.assertIsNotNone(summary_banner)
+        self.assertIn("MILTON SERVER SUMMARY", summary_banner)
 
 
 if __name__ == "__main__":
