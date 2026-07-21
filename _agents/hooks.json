@@ -1,0 +1,46 @@
+{
+  "milton-mutterings-summarizer": {
+    "enabled": true,
+    "PreInvocation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/plugins/antigravity/milton_hook.py"
+          }
+        ]
+      }
+    ],
+    "PostInvocation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/plugins/antigravity/milton_hook.py"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/plugins/antigravity/milton_hook.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/plugins/antigravity/milton_hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}
