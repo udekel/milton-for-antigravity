@@ -12,7 +12,13 @@ import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Ensure project root is in sys.path so app imports work regardless of CWD
+REPO_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 API_URL = os.getenv("MILTON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 LOG_FILE = "/tmp/milton_hook.log"
@@ -27,6 +33,8 @@ def log_event(msg: str):
 
 
 from app.utils.tracing import get_trace_headers
+
+
 
 
 def http_post(path: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
