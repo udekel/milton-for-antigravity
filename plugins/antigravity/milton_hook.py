@@ -165,18 +165,29 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
     res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
 
     if res and "explanation" in res and res["explanation"]:
-        explanation_text = f"[Milton Rationale]\n{res['explanation']}"
+        explanation_text = f"{res['explanation']}"
     else:
         rationale = extract_mutterings_rationale_from_transcript(transcript_path, tool_name, tool_args)
-        explanation_text = f"[Milton Rationale (Offline - Could not connect to Milton Server)]\n{rationale}"
+        explanation_text = f"(Offline fallback)\n{rationale}"
+
+    placeholder_text = f"[Milton Rationale (Force Injected Placeholder)]\nTool Target: {tool_name}\n{explanation_text}"
 
     return {
         "decision": "allow",
-        "reason": explanation_text,
-        "message": explanation_text,
-        "injected_message": explanation_text,
-        "user_message": explanation_text
+        "reason": placeholder_text,
+        "injectSteps": [
+            {
+                "ephemeralMessage": placeholder_text
+            },
+            {
+                "userMessage": placeholder_text
+            }
+        ],
+        "message": placeholder_text,
+        "injected_message": placeholder_text,
+        "user_message": placeholder_text,
     }
+
 
 
 
