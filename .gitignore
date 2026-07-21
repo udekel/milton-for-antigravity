@@ -1,0 +1,14 @@
+# Python byte-code / cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# SQLite Database files
+*.db
+*.sqlite3
+*.db-journal
+
+# Environment variables & local logs
+.env
+*.log
