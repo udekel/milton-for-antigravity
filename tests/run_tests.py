@@ -65,7 +65,7 @@ class TestMiltonOrchestrator(unittest.TestCase):
         )
         self.assertEqual(result.risk.risk_level, "HIGH")
         self.assertIn("orchestrator", result.selected_models)
-        self.assertIn("HIGH", result.explanation_text)
+        self.assertIn("Executing", result.explanation_text)
 
 
 class TestPIIRedactor(unittest.TestCase):
@@ -198,7 +198,7 @@ class TestAgents(unittest.TestCase):
         self.assertEqual(explanation.session_id, "session-123")
         self.assertEqual(explanation.target_tool, "run_command")
         # Ensure explanation explains WHY permission is needed in plain text
-        self.assertIn("required", explanation.explanation)
+        self.assertIn("Executing", explanation.explanation)
         self.assertNotIn("🔍", explanation.explanation)
         self.assertNotIn("[Milton Server", explanation.explanation)
         self.assertIn(explanation.risk_level.lower(), ("low", "medium", "high"))
@@ -272,7 +272,7 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
         with urllib.request.urlopen(f"http://127.0.0.1:8765/api/v1/session/{sid}/explain-request?target_tool=run_command") as resp:
             data = json.loads(resp.read().decode())
             self.assertEqual(data["target_tool"], "run_command")
-            self.assertIn("required", data["explanation"])
+            self.assertIn("Executing", data["explanation"])
 
 
     def test_milton_plugin_client_http_communication(self):

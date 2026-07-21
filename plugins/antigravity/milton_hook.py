@@ -68,7 +68,7 @@ def http_get(path: str) -> Optional[Dict[str, Any]]:
 
 
 def extract_mutterings_rationale_from_transcript(transcript_path: str, tool_name: str, tool_args: Dict[str, Any]) -> str:
-    """Extracts recent thinking from transcript file to produce a meaningful rationale."""
+    """Extracts recent thinking from transcript file to produce a concise 1-3 sentence rationale."""
     recent_thoughts = []
     if transcript_path and os.path.exists(transcript_path):
         try:
@@ -78,80 +78,36 @@ def extract_mutterings_rationale_from_transcript(transcript_path: str, tool_name
                 entry = json.loads(line)
                 thinking = entry.get("thinking") or (entry.get("content") if entry.get("type") in ("PLANNER_RESPONSE", "MODEL") else None)
                 if thinking and isinstance(thinking, str) and len(thinking.strip()) > 10:
-                    recent_thoughts.append(thinking.strip())
+                    thought = thinking.strip().replace("\n", " ")
+                    if "The user says:" in thought:
+                        thought = thought.split("The user says:")[-1].strip()
+                    recent_thoughts.append(thought)
                     break
         except Exception as e:
             log_event(f"Error reading transcript for rationale: {e}")
 
-    if recent_thoughts:
-        thought = recent_thoughts[0].replace("\n", " ")
-        if len(thought) > 200:
-            thought = thought[:197] + "..."
-        return f"Needed to support action: {thought}"
+    thought_str = recent_thoughts[0] if recent_thoughts else ""
+    if len(thought_str) > 150:
+        thought_str = thought_str[:147] + "..."
+    if thought_str and not thought_str.endswith("."):
+        thought_str += "."
 
     if tool_name == "run_command":
         cmd = (tool_args or {}).get("CommandLine", "")
-        if "pytest" in cmd or "test" in cmd:
-            return "Needed to execute test suite and verify implementation."
-        elif "git" in cmd:
-            return "Needed to inspect or update git repository state."
-        elif cmd:
-            return f"Needed to run shell command '{cmd[:80]}' for turn execution."
-        return "Needed to execute shell diagnostic or build command."
-    elif tool_name in ("write_file", "replace_file_content", "multi_replace_file_content"):
+        cmd_str = f"Executing shell command `{cmd[:90]}`." if cmd else "Executing shell command."
+        return f"{thought_str} {cmd_str}".strip() if thought_str else cmd_str
+    elif tool_name in ("write_file", "replace_file_content", "multi_replace_file_content", "write_to_file"):
         target = (tool_args or {}).get("TargetFile", "")
         file_name = target.split("/")[-1] if target else "workspace file"
-        return f"Needed to apply requested code edits to {file_name}."
-    elif tool_name == "delete_file":
-        return "Needed to remove obsolete workspace files."
-    
-    return f"Needed to execute tool '{tool_name}' to proceed with task objective."
+        mod_str = f"Applying code modifications to {file_name}."
+        return f"{thought_str} {mod_str}".strip() if thought_str else mod_str
 
-
-def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
-    """Reads trajectory transcript log file and syncs recent fragments to local Milton server."""
-    if not transcript_path or not os.path.exists(transcript_path):
-        return
-
-    try:
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            lines = [l.strip() for l in f if l.strip()]
-
-        for line in lines[-10:]:
-            try:
-                entry = json.loads(line)
-                step_type = entry.get("type")
-
-                # Sync intermediate stream of thought / mutterings
-                thinking = entry.get("thinking")
-                if thinking:
-                    http_post(f"/api/v1/session/{session_id}/fragment", {
-                        "type": "muttering",
-                        "content": thinking
-                    })
-
-                content = entry.get("content")
-                if content and not thinking and step_type in ("PLANNER_RESPONSE", "MODEL"):
-                    http_post(f"/api/v1/session/{session_id}/fragment", {
-                        "type": "muttering",
-                        "content": content
-                    })
-
-                for tc in entry.get("tool_calls", []):
-                    if isinstance(tc, dict):
-                        http_post(f"/api/v1/session/{session_id}/fragment", {
-                            "type": "pre_tool_call",
-                            "tool_name": tc.get("name") or tc.get("type", "tool"),
-                            "args": tc.get("args")
-                        })
-            except Exception:
-                continue
-    except Exception as e:
-        log_event(f"Transcript sync error: {e}")
+    tool_str = f"Executing tool '{tool_name}'."
+    return f"{thought_str} {tool_str}".strip() if thought_str else tool_str
 
 
 def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale, returning decision='ask' to defer to user modal."""
+    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale, returning decision='ask' for permission-gated tools to defer to user modal."""
     tool_call = payload.get("toolCall", {})
     tool_name = tool_call.get("name", "unknown_tool")
     tool_args = tool_call.get("args", {})
@@ -172,14 +128,17 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
         # Robust fallback: extract rationale locally from transcript or tool signature
         rationale = extract_mutterings_rationale_from_transcript(transcript_path, tool_name, tool_args)
 
-    reason_text = (
-        f"[Milton Rationale]\n"
-        f"Tool Target: {tool_name}\n"
-        f"Rationale: {rationale}"
-    )
+    reason_text = f"[Milton Rationale]\n{rationale}"
+
+    # Only return decision='ask' for permission-gated / interactive prompt tools
+    # to avoid blocking internal workspace operations (view_file, replace_file_content, etc.)
+    if tool_name in ("run_command", "read_url", "ask_permission", "execute_url"):
+        decision = "ask"
+    else:
+        decision = "allow"
 
     return {
-        "decision": "ask",
+        "decision": decision,
         "reason": reason_text
     }
 

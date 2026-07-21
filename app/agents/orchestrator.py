@@ -62,7 +62,6 @@ class TrajectorySynthesizerAgent:
         selected_model = ModelRouter.route_analyzer_request(len(turns), len(fragments))
         logger.info(f"TrajectorySynthesizer processing session '{session_id}' using model '{selected_model}'", extra={"session_id": session_id})
 
-        # Extract recent thoughts
         mutterings = []
         for f in fragments:
             if getattr(f, "type", None) == "muttering" and getattr(f, "content", None):
@@ -70,13 +69,20 @@ class TrajectorySynthesizerAgent:
             elif isinstance(f, dict) and f.get("type") == "muttering" and f.get("content"):
                 mutterings.append(f["content"])
 
-        text_block = " ".join(mutterings[-5:]) if mutterings else "Analyzing session objective"
-        text_block = PIIRedactor.redact_text(text_block)
+        last_thought = ""
+        if mutterings:
+            last_thought = mutterings[-1].strip().replace("\n", " ")
+            if "The user says:" in last_thought:
+                last_thought = last_thought.split("The user says:")[-1].strip()
+            if len(last_thought) > 150:
+                last_thought = last_thought[:147] + "..."
+
+        last_thought = PIIRedactor.redact_text(last_thought)
 
         return TrajectorySynthesis(
-            overall_goal=f"Execute user prompt strategy: {text_block[:100]}...",
-            current_subtask=f"Synthesizing recent mutterings: {text_block[:80]}",
-            pending_tool_intent="Preparing next tool step",
+            overall_goal=last_thought or "Executing workspace objective",
+            current_subtask=last_thought or "Processing objective step",
+            pending_tool_intent="Executing tool step",
             selected_model=selected_model
         )
 
@@ -126,11 +132,27 @@ class MiltonOrchestrator:
 
         selected_model = ModelRouter.route_explain_request(target_tool, tool_args, len(fragments))
 
-        explanation_text = (
-            f"Action in progress: {synthesis.current_subtask}. "
-            f"Tool '{target_tool}' ({risk.risk_level} Risk) required. "
-            f"Safety note: {risk.safety_notes}"
-        )
+        subtask = synthesis.current_subtask.strip()
+        if subtask and not subtask.endswith("."):
+            subtask += "."
+
+        if target_tool == "run_command":
+            cmd = (tool_args or {}).get("CommandLine", "")
+            action_desc = f"Executing shell command `{cmd[:100]}`." if cmd else "Executing shell command."
+        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content", "write_to_file"):
+            target_path = (tool_args or {}).get("TargetFile", "")
+            file_name = target_path.split("/")[-1] if target_path else "workspace file"
+            action_desc = f"Applying code modifications to {file_name}."
+        elif target_tool == "delete_file":
+            action_desc = "Removing workspace file."
+        else:
+            action_desc = f"Executing tool '{target_tool}'."
+
+        if subtask:
+            explanation_text = f"{subtask} {action_desc}"
+        else:
+            explanation_text = action_desc
+
         explanation_text = PIIRedactor.redact_text(explanation_text)
 
         summary_text = (

@@ -74,19 +74,21 @@ class RequestExplainerAgent:
             if len(clean_thought) > 180:
                 clean_thought = clean_thought[:177] + "..."
 
-        if clean_thought:
-            explanation = f"Action in progress: {clean_thought}. Tool '{target_tool}' required for this step."
-        elif target_tool == "run_command":
+        if clean_thought and not clean_thought.endswith("."):
+            clean_thought += "."
+
+        if target_tool == "run_command":
             cmd = (tool_args or {}).get("CommandLine", "")
-            explanation = f"Required to run shell command '{cmd[:80]}' for turn execution." if cmd else "Required to execute shell command for environment check or build."
-        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content"):
+            cmd_desc = f"Executing shell command `{cmd[:80]}`." if cmd else "Executing shell command."
+            explanation = f"{clean_thought} {cmd_desc}".strip() if clean_thought else cmd_desc
+        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content", "write_to_file"):
             target_path = (tool_args or {}).get("TargetFile", "")
             file_name = target_path.split("/")[-1] if target_path else "workspace file"
-            explanation = f"Required to update {file_name} with code changes."
-        elif target_tool == "delete_file":
-            explanation = "Required to remove obsolete workspace files."
+            mod_desc = f"Applying code modifications to {file_name}."
+            explanation = f"{clean_thought} {mod_desc}".strip() if clean_thought else mod_desc
         else:
-            explanation = f"Required to execute tool '{target_tool}' to fulfill turn objective."
+            tool_desc = f"Executing tool '{target_tool}'."
+            explanation = f"{clean_thought} {tool_desc}".strip() if clean_thought else tool_desc
 
 
         # Risk assessment
