@@ -26,11 +26,16 @@ def log_event(msg: str):
         pass
 
 
+from app.utils.tracing import get_trace_headers
+
+
 def http_post(path: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     url = f"{API_URL}{path}"
     try:
         data_bytes = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data_bytes, headers={"Content-Type": "application/json"}, method="POST")
+        headers = {"Content-Type": "application/json"}
+        headers.update(get_trace_headers())
+        req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=2.0) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode("utf-8"))
@@ -42,13 +47,16 @@ def http_post(path: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def http_get(path: str) -> Optional[Dict[str, Any]]:
     url = f"{API_URL}{path}"
     try:
-        req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+        headers = {"Content-Type": "application/json"}
+        headers.update(get_trace_headers())
+        req = urllib.request.Request(url, headers=headers, method="GET")
         with urllib.request.urlopen(req, timeout=2.0) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         log_event(f"HTTP GET {path} error: {e}")
     return None
+
 
 
 def extract_mutterings_rationale_from_transcript(transcript_path: str, tool_name: str, tool_args: Dict[str, Any]) -> str:

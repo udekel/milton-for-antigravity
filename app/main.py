@@ -14,11 +14,30 @@ from app.models.schemas import (
     StartSessionRequest,
     TurnData,
 )
+from app.utils.logger import get_json_logger
+from app.utils.tracing import (
+    get_current_span_id,
+    get_current_trace_id,
+    get_trace_headers,
+    parse_traceparent,
+    set_trace_context,
+)
 
-logging.basicConfig(level=logging.INFO, format="[Milton Server] %(asctime)s - %(levelname)s - %(message)s")
+logger = get_json_logger("milton.server")
 
 
 class MiltonHTTPRequestHandler(BaseHTTPRequestHandler):
+
+    def _extract_trace_context(self):
+        traceparent = self.headers.get("traceparent") or self.headers.get("X-Trace-ID")
+        if traceparent:
+            parsed = parse_traceparent(traceparent)
+            if parsed:
+                set_trace_context(parsed[0], parsed[1])
+            else:
+                set_trace_context(trace_id=traceparent if len(traceparent) == 32 else None)
+        else:
+            set_trace_context()
 
     def _send_json(self, data: dict, status_code: int = 200):
         self.send_response(status_code)
@@ -26,20 +45,30 @@ class MiltonHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "*")
         self.send_header("Access-Control-Allow-Headers", "*")
+        
+        # Inject traceparent and X-Trace-ID response headers
+        headers = get_trace_headers()
+        for k, v in headers.items():
+            self.send_header(k, v)
+
         self.end_headers()
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
     def do_OPTIONS(self):
+        self._extract_trace_context()
         self._send_json({})
 
     def do_GET(self):
+        self._extract_trace_context()
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
 
         if path in ("/", "/api/v1/healthz"):
+            logger.info("Health check processed", extra={"status_code": 200})
             self._send_json({"status": "ok", "app": settings.app_name})
             return
+
 
         store = get_session_store()
 
@@ -80,8 +109,10 @@ class MiltonHTTPRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Not Found"}, 404)
 
     def do_POST(self):
+        self._extract_trace_context()
         parsed = urlparse(self.path)
         path = parsed.path
+
 
         content_length = int(self.headers.get("Content-Length", 0))
         body_bytes = self.rfile.read(content_length) if content_length > 0 else b"{}"

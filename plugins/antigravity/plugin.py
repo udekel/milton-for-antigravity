@@ -5,7 +5,10 @@ import urllib.request
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-logging.basicConfig(level=logging.INFO, format="[Milton Plugin] %(asctime)s - %(levelname)s - %(message)s")
+from app.utils.logger import get_json_logger
+from app.utils.tracing import get_trace_headers
+
+logger = get_json_logger("milton.plugin")
 
 
 class MiltonMode(str, Enum):
@@ -31,24 +34,29 @@ class MiltonAntigravityPlugin:
         url = f"{self.api_url}{path}"
         try:
             data_bytes = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(url, data=data_bytes, headers={"Content-Type": "application/json"}, method="POST")
+            headers = {"Content-Type": "application/json"}
+            headers.update(get_trace_headers())
+            req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=3.0) as resp:
                 if resp.status == 200:
                     return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
-            logging.warning(f"Milton API POST {path} failed: {e}")
+            logger.warning(f"Milton API POST {path} failed: {e}")
         return None
 
     def _http_get(self, path: str) -> Optional[Dict[str, Any]]:
         url = f"{self.api_url}{path}"
         try:
-            req = urllib.request.Request(url, headers={"Content-Type": "application/json"}, method="GET")
+            headers = {"Content-Type": "application/json"}
+            headers.update(get_trace_headers())
+            req = urllib.request.Request(url, headers=headers, method="GET")
             with urllib.request.urlopen(req, timeout=3.0) as resp:
                 if resp.status == 200:
                     return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
-            logging.warning(f"Milton API GET {path} failed: {e}")
+            logger.warning(f"Milton API GET {path} failed: {e}")
         return None
+
 
     def on_session_start(self, session_id: str, workspace_paths: List[str]):
         """Hook called when a new coding session starts."""

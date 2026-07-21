@@ -27,6 +27,9 @@ from app.models.schemas import (
     SummaryResult,
     TurnData,
 )
+from app.utils.logger import JSONLogFormatter
+from app.utils.pii_redactor import PIIRedactor
+from app.utils.tracing import generate_trace_id, make_traceparent, parse_traceparent
 from app.memory.session_store import SessionStore, get_session_store
 from app.agents.analyzer import MutteringAnalyzerAgent
 from app.agents.explainer import RequestExplainerAgent
@@ -35,7 +38,53 @@ from plugins.antigravity.plugin import MiltonAntigravityPlugin, MiltonMode
 from plugins.antigravity.milton_hook import handle_pre_tool_use, handle_post_invocation
 
 
+
+class TestPIIRedactor(unittest.TestCase):
+
+    def test_email_redaction(self):
+        text = "Contact user at john.doe@example.com for support."
+        redacted = PIIRedactor.redact_text(text)
+        self.assertNotIn("john.doe@example.com", redacted)
+        self.assertIn("[REDACTED_EMAIL]", redacted)
+
+    def test_token_redaction(self):
+        text = "Using secret=sample_dummy_token_abc_xyz for auth"
+        redacted = PIIRedactor.redact_text(text)
+        self.assertNotIn("sample_dummy_token_abc_xyz", redacted)
+        self.assertIn("[REDACTED_SECRET]", redacted)
+
+
+
+
+    def test_dict_secret_key_redaction(self):
+        data = {"username": "udekel", "password": "supersecretpassword123", "nested": {"api_key": "abc123xyz456"}}
+        redacted = PIIRedactor.redact_data(data)
+        self.assertEqual(redacted["password"], "[REDACTED_SECRET]")
+        self.assertEqual(redacted["nested"]["api_key"], "[REDACTED_SECRET]")
+
+
+class TestTracingAndLogging(unittest.TestCase):
+
+    def test_w3c_traceparent_parsing(self):
+        header = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        parsed = parse_traceparent(header)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed[0], "4bf92f3577b34da6a3ce929d0e0e4736")
+        self.assertEqual(parsed[1], "00f067aa0ba902b7")
+
+    def test_json_log_formatter(self):
+        import logging
+        formatter = JSONLogFormatter()
+        record = logging.LogRecord("test", logging.INFO, "path", 10, "User email is user@google.com", (), None)
+        log_json_str = formatter.format(record)
+        data = json.loads(log_json_str)
+        self.assertEqual(data["level"], "INFO")
+        self.assertIn("[REDACTED_EMAIL]", data["message"])
+        self.assertIn("trace_id", data)
+
+
 class TestSessionStore(unittest.TestCase):
+
 
     def setUp(self):
         self.temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)

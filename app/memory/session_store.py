@@ -7,10 +7,12 @@ from threading import Lock
 
 from app.config import settings
 from app.models.schemas import FragmentData, TurnData
+from app.utils.pii_redactor import PIIRedactor
 
 
 class SessionStore:
-    """Multi-turn Session Store with In-Memory Cache and SQLite Persistence."""
+    """Multi-turn Session Store with In-Memory Cache, SQLite Persistence, and PII Redaction."""
+
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or settings.db_path
@@ -93,6 +95,14 @@ class SessionStore:
         if not fragment.fragment_id:
             fragment.fragment_id = f"frag-{uuid.uuid4().hex[:8]}"
 
+        # Redact PII in content, args, and output_preview
+        if fragment.content:
+            fragment.content = PIIRedactor.redact_text(fragment.content)
+        if fragment.args:
+            fragment.args = PIIRedactor.redact_data(fragment.args)
+        if fragment.output_preview:
+            fragment.output_preview = PIIRedactor.redact_text(fragment.output_preview)
+
         now = fragment.timestamp or datetime.utcnow().isoformat()
         args_json = json.dumps(fragment.args) if fragment.args else None
 
@@ -140,6 +150,18 @@ class SessionStore:
                     if not turn.turn_id:
                         turn.turn_id = f"turn-{uuid.uuid4().hex[:8]}"
 
+                    # Redact PII in turn data
+                    if turn.user_prompt:
+                        turn.user_prompt = PIIRedactor.redact_text(turn.user_prompt)
+                    if turn.final_response:
+                        turn.final_response = PIIRedactor.redact_text(turn.final_response)
+                    if turn.fragments:
+                        for f in turn.fragments:
+                            if f.content:
+                                f.content = PIIRedactor.redact_text(f.content)
+                            if f.args:
+                                f.args = PIIRedactor.redact_data(f.args)
+
                     turn_ts = turn.timestamp or datetime.utcnow().isoformat()
                     fragments_json = json.dumps([f.to_dict() for f in turn.fragments])
 
@@ -166,6 +188,7 @@ class SessionStore:
                 self._cache[session_id]["turns"].extend(turns)
 
         return processed_count
+
 
     def get_fragments(self, session_id: str) -> List[FragmentData]:
         with self._lock:
