@@ -104,7 +104,7 @@ class MiltonAntigravityPlugin:
                 encoded_args = urllib.parse.quote(json.dumps(tool_args))
                 res = self._http_get(f"/api/v1/session/{self.session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
                 if res and "explanation" in res:
-                    explanation_text = f"🔍 [Milton Server Explanation]: {res['explanation']}"
+                    explanation_text = res["explanation"]
                     return {
                         "decision": "force_ask",
                         "reason": explanation_text,
@@ -127,7 +127,7 @@ class MiltonAntigravityPlugin:
         self._http_post(f"/api/v1/session/{self.session_id}/fragment", frag)
 
     def on_turn_complete(self, final_response: str) -> Optional[str]:
-        """Hook called when turn finishes. Fetches server-generated summary."""
+        """Hook called when turn finishes. Fetches server-generated summary of mutterings."""
         if self.mode == MiltonMode.OFF or not self.session_id:
             return None
 
@@ -135,14 +135,13 @@ class MiltonAntigravityPlugin:
             res = self._http_get(f"/api/v1/session/{self.session_id}/summary")
             if res and "human_summary" in res:
                 actions = ", ".join(res.get("actions_executed", [])) or "None"
-                risks = ", ".join(res.get("risk_flags", [])) or "None"
                 
                 return (
                     "\n" + "="*65 + "\n"
-                    "📌 [MILTON SERVER SUMMARY]\n"
-                    f"  • Summary: {res['human_summary']}\n"
-                    f"  • Actions Executed: {actions}\n"
-                    f"  • Safety & Risk Flags: {risks}\n"
+                    "Milton Summary of Mutterings:\n"
+                    f"{res['human_summary']}\n"
+                    f"Actions Executed: {actions}\n"
                     + "="*65 + "\n"
                 )
         return None
+

@@ -118,7 +118,10 @@ class TestAgents(unittest.TestCase):
         explanation = explainer.explain("session-123", "run_command", turns, fragments, {"CommandLine": "pip install -r requirements.txt"})
         self.assertEqual(explanation.session_id, "session-123")
         self.assertEqual(explanation.target_tool, "run_command")
-        self.assertIn("run_command", explanation.explanation)
+        # Ensure explanation explains WHY permission is needed in plain text
+        self.assertIn("Needed to", explanation.explanation)
+        self.assertNotIn("🔍", explanation.explanation)
+        self.assertNotIn("[Milton Server", explanation.explanation)
         self.assertIn(explanation.risk_level, ("low", "medium", "high"))
 
 
@@ -183,12 +186,13 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
             data = json.loads(resp.read().decode())
             self.assertEqual(data["session_id"], sid)
             self.assertIn("Executed tool: run_command", data["actions_executed"])
+            self.assertIn("Summary of Mutterings:", data["human_summary"])
 
         # 5. Explain Permission Request
         with urllib.request.urlopen(f"http://127.0.0.1:8765/api/v1/session/{sid}/explain-request?target_tool=run_command") as resp:
             data = json.loads(resp.read().decode())
             self.assertEqual(data["target_tool"], "run_command")
-            self.assertIn("run_command", data["explanation"])
+            self.assertIn("Needed to", data["explanation"])
 
     def test_milton_plugin_client_http_communication(self):
         plugin = MiltonAntigravityPlugin(mode=MiltonMode.SUMMARIZE_EVERYTHING, api_url="http://127.0.0.1:8765")
@@ -201,12 +205,14 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
         intervention = plugin.on_pre_tool_call("run_command", {"CommandLine": "make"}, step_idx=1)
         self.assertIsNotNone(intervention)
         self.assertEqual(intervention["decision"], "force_ask")
-        self.assertIn("Milton Server", intervention["reason"])
+        self.assertIn("Needed to", intervention["reason"])
+        self.assertNotIn("🔍", intervention["reason"])
 
         plugin.on_post_tool_call("run_command", "Build OK")
         summary_banner = plugin.on_turn_complete("Build completed successfully.")
         self.assertIsNotNone(summary_banner)
-        self.assertIn("MILTON SERVER SUMMARY", summary_banner)
+        self.assertIn("Milton Summary of Mutterings", summary_banner)
+
 
 
 if __name__ == "__main__":

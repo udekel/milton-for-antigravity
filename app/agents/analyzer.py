@@ -33,6 +33,7 @@ class MutteringAnalyzerAgent:
         tested_and_rejected = []
         key_decisions = []
         risk_flags = []
+        mutterings = []
         needs_permissions = False
 
         all_fragments = list(fragments)
@@ -42,12 +43,15 @@ class MutteringAnalyzerAgent:
         for frag in all_fragments:
             text = (frag.content or "").lower()
 
+            if frag.type == "muttering" and frag.content:
+                mutterings.append(frag.content.strip())
+
             if frag.type == "pre_tool_call" and frag.tool_name:
                 actions_executed.append(f"Executed tool: {frag.tool_name}")
                 if frag.tool_name in ("run_command", "write_file", "ask_permission"):
                     needs_permissions = True
                     if frag.args:
-                        risk_flags.append(f"Command execution: {frag.args}")
+                        risk_flags.append(f"Permission tool call: {frag.tool_name}")
 
             if "failed" in text or "error" in text or "rejected" in text or "cannot" in text:
                 tested_and_rejected.append(frag.content[:100] if frag.content else "Sub-task failed/rejected")
@@ -58,10 +62,17 @@ class MutteringAnalyzerAgent:
         if not actions_executed:
             actions_executed.append("Reasoned over prompt and trajectory history")
 
-        human_summary = (
-            f"Processed {len(turns)} turns and {len(all_fragments)} fragments. "
-            f"Executed {len(actions_executed)} tool actions with {len(risk_flags)} safety/risk flags."
-        )
+        if mutterings:
+            # Highlight recent stream of thought / reasoning steps
+            recent_summary = " ".join(mutterings[-3:])
+            if len(recent_summary) > 250:
+                recent_summary = recent_summary[:247] + "..."
+            human_summary = f"Summary of Mutterings: {recent_summary}"
+        else:
+            human_summary = (
+                f"Summary of Mutterings: Processed {len(turns)} turns and {len(all_fragments)} events. "
+                f"Executed {len(actions_executed)} tool actions."
+            )
 
         return SummaryResult(
             session_id=session_id,
@@ -80,13 +91,14 @@ class MutteringAnalyzerAgent:
         
         prompt = (
             "You are Milton, an AI system analyzing intermediate thoughts and tool calls from a coding agent.\n"
-            "Analyze the provided trajectory data and return a JSON object with fields:\n"
+            "Provide a concise summary of the agent's stream-of-thought mutterings for human summary field.\n"
+            "Return a JSON object with fields:\n"
             "- actions_executed (list of strings)\n"
             "- tested_and_rejected (list of strings)\n"
             "- key_decisions (list of strings)\n"
             "- risk_flags (list of strings)\n"
             "- needs_info_or_permissions (boolean)\n"
-            "- human_summary (string)\n\n"
+            "- human_summary (string starting with 'Summary of Mutterings: ')\n\n"
             f"Turns Data: {[t.to_dict() for t in turns]}\n"
             f"Fragments Data: {[f.to_dict() for f in fragments]}\n"
         )
@@ -99,3 +111,4 @@ class MutteringAnalyzerAgent:
         data = json.loads(response.text)
         data["session_id"] = session_id
         return SummaryResult(**data)
+

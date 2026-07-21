@@ -49,35 +49,45 @@ class RequestExplainerAgent:
 
         recent_thoughts = []
         for frag in reversed(all_fragments[-10:]):
-            if frag.content:
+            if frag.content and frag.type in ("muttering", "user_prompt"):
                 recent_thoughts.append(frag.content.strip())
+
+        last_thought = recent_thoughts[0] if recent_thoughts else ""
+
+        # Build explanation focusing on WHY the permission is needed (rationale/purpose)
+        if last_thought:
+            explanation = f"Needed to support ongoing action: {last_thought}"
+        elif target_tool == "run_command":
+            cmd = (tool_args or {}).get("CommandLine", "")
+            if "test" in cmd or "pytest" in cmd:
+                explanation = "Needed to run test suite and verify implementation."
+            elif "build" in cmd or "make" in cmd:
+                explanation = "Needed to compile project artifacts and verify build status."
+            elif "git" in cmd:
+                explanation = "Needed to check or update git repository status and commits."
+            else:
+                explanation = f"Needed to execute command '{cmd}' to complete task requirements." if cmd else "Needed to execute shell diagnostic or build command."
+        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content"):
+            target_path = (tool_args or {}).get("TargetFile", "")
+            file_name = target_path.split("/")[-1] if target_path else "workspace file"
+            explanation = f"Needed to update {file_name} with required code changes."
+        elif target_tool == "delete_file":
+            explanation = "Needed to remove obsolete workspace files."
+        else:
+            explanation = f"Needed to execute action for tool '{target_tool}' to fulfill turn objective."
+
+        # Risk assessment
+        if target_tool in ("delete_file", "run_command"):
+            risk_level = "medium"
+        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content"):
+            risk_level = "medium"
+        else:
+            risk_level = "low"
 
         context_summary = (
             f"Preceding trajectory contains {len(turns)} turns and {len(all_fragments)} events. "
-            f"Latest focus: '{recent_thoughts[0]}' " if recent_thoughts else "Initial turn action."
+            f"Primary focus: {last_thought or 'Turn execution'}"
         )
-
-        args_str = f" with args {tool_args}" if tool_args else ""
-
-        if target_tool == "run_command":
-            risk_level = "medium"
-            explanation = (
-                f"The agent wants to execute shell command ({target_tool}{args_str}). "
-                f"Based on recent thoughts ('{recent_thoughts[0] if recent_thoughts else 'environment check'}'), "
-                f"it needs shell access to run diagnostics or tests."
-            )
-        elif target_tool in ("write_file", "delete_file"):
-            risk_level = "high" if target_tool == "delete_file" else "medium"
-            explanation = (
-                f"The agent wants to modify filesystem resources ({target_tool}{args_str}). "
-                f"Preceding mutterings show it reasoned about creating or editing code files."
-            )
-        else:
-            risk_level = "low"
-            explanation = (
-                f"The agent requires access to tool '{target_tool}'{args_str}. "
-                f"Preceding reasoning steps indicate it needs this tool to fulfill your prompt."
-            )
 
         return ExplainRequestResult(
             session_id=session_id,
@@ -100,7 +110,9 @@ class RequestExplainerAgent:
         client = genai.Client(api_key=self.api_key)
         
         prompt = (
-            "You are Milton. Explain why a coding agent is making this permission request.\n"
+            "You are Milton. Explain EXCLUSIVELY WHY a coding agent needs this permission request based on its intermediate thoughts and goal.\n"
+            "Do NOT restate what tool or arguments are being executed (the user already sees the tool request itself).\n"
+            "Provide a concise plain text explanation without any markdown formatting, markup, emojis, brackets, or backticks.\n"
             f"Target Tool: {target_tool}\n"
             f"Tool Arguments: {tool_args}\n"
             f"Preceding Turns: {[t.to_dict() for t in turns[-3:]]}\n"
@@ -117,3 +129,4 @@ class RequestExplainerAgent:
         data["session_id"] = session_id
         data["target_tool"] = target_tool
         return ExplainRequestResult(**data)
+
