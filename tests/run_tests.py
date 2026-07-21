@@ -354,5 +354,52 @@ class TestGoldenDatasetEvaluation(unittest.TestCase):
             self.assertTrue(r["passed"], f"Golden dataset case {r['case_id']} failed: {r['failures']}")
 
 
+class TestFastAPIAsyncServer(unittest.TestCase):
+
+    def test_fastapi_async_routes_and_background_tasks(self):
+        from app.main import HAS_FASTAPI, fastapi_app
+        if not HAS_FASTAPI:
+            self.skipTest("FastAPI not installed in current environment")
+
+        from fastapi.testclient import TestClient
+        client = TestClient(fastapi_app)
+
+        # 1. Healthz
+        res = client.get("/api/v1/healthz")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "ok")
+
+        # 2. Start session
+        res = client.post("/api/v1/session/start", json={"workspace_paths": ["/workspace"]})
+        self.assertEqual(res.status_code, 200)
+        sid = res.json()["session_id"]
+
+        # 3. Add fragment (triggers BackgroundTasks)
+        res = client.post(f"/api/v1/session/{sid}/fragment", json={"type": "muttering", "content": "Running async test"})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "success")
+
+        # 4. Add turn (triggers BackgroundTasks)
+        res = client.post(f"/api/v1/session/{sid}/turn", json={
+            "turns": [{
+                "user_prompt": "Run tests",
+                "current_action": "run_command",
+                "final_response": "Passed",
+                "fragments": [{"type": "muttering", "content": "Executing pytest"}]
+            }]
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "success")
+
+        # 5. Summary
+        res = client.get(f"/api/v1/session/{sid}/summary")
+        self.assertEqual(res.status_code, 200)
+
+        # 6. Explain request
+        res = client.get(f"/api/v1/session/{sid}/explain-request?target_tool=run_command")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("explanation", res.json())
+
+
 if __name__ == "__main__":
     unittest.main()

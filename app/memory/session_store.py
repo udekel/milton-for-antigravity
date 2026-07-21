@@ -251,6 +251,27 @@ class SessionStore:
                 conn.commit()
             self._cache.clear()
 
+    # --- Async Non-Blocking Wrappers ---
+    async def async_create_session(self, session_id: Optional[str] = None, workspace_paths: Optional[List[str]] = None) -> str:
+        import asyncio
+        return await asyncio.to_thread(self.create_session, session_id, workspace_paths)
+
+    async def async_add_fragment(self, session_id: str, fragment: FragmentData) -> str:
+        import asyncio
+        return await asyncio.to_thread(self.add_fragment, session_id, fragment)
+
+    async def async_add_turn_batch(self, session_id: str, turns: List[TurnData]) -> int:
+        import asyncio
+        return await asyncio.to_thread(self.add_turn_batch, session_id, turns)
+
+    async def async_get_fragments(self, session_id: str) -> List[FragmentData]:
+        import asyncio
+        return await asyncio.to_thread(self.get_fragments, session_id)
+
+    async def async_get_turns(self, session_id: str) -> List[TurnData]:
+        import asyncio
+        return await asyncio.to_thread(self.get_turns, session_id)
+
 
 _global_session_store: Optional[SessionStore] = None
 
