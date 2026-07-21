@@ -55,7 +55,7 @@ def read_transcript_mutterings(transcript_path: str) -> List[Dict[str, Any]]:
 
 
 def handle_post_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires after a model invocation completes. Injects an ephemeral summary message."""
+    """Fires after a model invocation completes. Injects a prominent summary message into the UI."""
     log_event("Handling PostInvocation hook")
     transcript_path = payload.get("transcriptPath", "")
     mutterings = read_transcript_mutterings(transcript_path)
@@ -74,16 +74,19 @@ def handle_post_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
                 recent_tools.append(tc.get("name") or tc.get("type", "tool"))
 
     summary_text = (
-        "📌 [MILTON MUTTERINGS SUMMARY]\n"
-        f"• Stream of Thought Turns Processed: {len(mutterings)}\n"
-        f"• Actions Executed: {', '.join(set(recent_tools)) if recent_tools else 'General Reasoning'}\n"
+        "📌 **[MILTON MUTTERINGS SUMMARY]**\n"
+        f"- **Stream of Thought Turns Processed**: {len(mutterings)}\n"
+        f"- **Actions Executed**: `{', '.join(set(recent_tools)) if recent_tools else 'General Reasoning'}`\n"
     )
     if recent_thoughts:
-        summary_text += f"• Latest Monologue: \"{recent_thoughts[-1]}\"\n"
+        summary_text += f"- **Latest Monologue**: *\"{recent_thoughts[-1]}\"*\n"
 
-    log_event(f"Injecting summary text: {summary_text[:60]}...")
+    log_event(f"Injecting summary banner into UI...")
     return {
         "injectSteps": [
+            {
+                "userMessage": summary_text
+            },
             {
                 "ephemeralMessage": summary_text
             }
@@ -100,7 +103,7 @@ def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name in ("run_command", "write_file", "ask_permission"):
         return {
             "allowTool": True,
-            "reason": f"🔍 [Milton] Tool '{tool_name}' execution requested. Preceding mutterings analyzed for safety."
+            "reason": f"🔍 [Milton Request Rationale] Tool '{tool_name}' requested. Preceding mutterings analyzed."
         }
 
     return {"allowTool": True}
