@@ -209,14 +209,8 @@ def main():
 
         if "toolCall" in payload:
             result = handle_pre_tool_use(session_id, payload)
-            if "reason" in result and result["reason"]:
-                sys.stderr.write(f"\n{result['reason']}\n\n")
-                sys.stderr.flush()
         else:
             result = handle_post_invocation(session_id, payload)
-            if "summary" in result and result["summary"]:
-                sys.stderr.write(f"\n{result['summary']}\n\n")
-                sys.stderr.flush()
 
         json.dump(result, sys.stdout)
         sys.stdout.flush()
