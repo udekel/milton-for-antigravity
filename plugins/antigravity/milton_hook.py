@@ -200,6 +200,9 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
         "injectSteps": [
             {
                 "userMessage": summary_text
+            },
+            {
+                "ephemeralMessage": summary_text
             }
         ],
         "summary": summary_text,
@@ -207,6 +210,7 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
         "message": summary_text,
         "terminationBehavior": ""
     }
+
 
 
 
