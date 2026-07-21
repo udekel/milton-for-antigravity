@@ -135,8 +135,12 @@ class MiltonHTTPRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Not Found"}, 404)
 
 
+class MiltonHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
+
 def run_server(host: str = settings.host, port: int = settings.port):
-    server = HTTPServer((host, port), MiltonHTTPRequestHandler)
+    server = MiltonHTTPServer((host, port), MiltonHTTPRequestHandler)
     logging.info(f"🚀 Milton Agent Backend running locally on http://{host}:{port}")
     try:
         server.serve_forever()
@@ -147,3 +151,4 @@ def run_server(host: str = settings.host, port: int = settings.port):
 
 if __name__ == "__main__":
     run_server()
+
