@@ -309,7 +309,7 @@ class TestMiltonHook(unittest.TestCase):
             }
         }
         res = handle_pre_tool_use("test-session-hook", payload)
-        self.assertEqual(res["decision"], "allow")
+        self.assertEqual(res["decision"], "ask")
         self.assertIn("[Milton Rationale]", res["reason"])
         self.assertNotIn("Tool Target:", res["reason"])
         self.assertNotIn("Action in progress:", res["reason"])

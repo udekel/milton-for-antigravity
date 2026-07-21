@@ -172,8 +172,13 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
 
     reason_text = f"[Milton Rationale]\n{rationale}"
 
+    if tool_name in ("run_command", "read_url", "ask_permission", "execute_url"):
+        decision = "ask"
+    else:
+        decision = "allow"
+
     return {
-        "decision": "allow",
+        "decision": decision,
         "reason": reason_text
     }
 
