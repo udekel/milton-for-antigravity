@@ -42,3 +42,45 @@ In most cases, Milton will respond to these based on only a single turn, but it 
 In addition to the API, we will have a plugin that works for Antigravity (or Google Internal Jetski) in either CLI or UI mode. There should be a way to have it in one of three modes: Off, Summarize Everything, and Only Explain Requests. 
 
 Unless Milton is off, at the end of every turn the prompts, mutterings, responses, etc are sent. Or if we use hooks and don't have any other option, we will send each one separately. Then, when a turn complete and we have a response, we will present the summary/details OR we will present just the explanation for a choice. 
+
+## Infrastructure as Code (IaC) & Deployment
+
+Milton includes full **Infrastructure as Code (IaC)** configurations in [`terraform/`](file:///google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/terraform) for users deploying their own cloud instances:
+
+- **Terraform Provisions**:
+  - Cloud Run v2 container service with auto-scaling (1–10 instances) & memory/CPU limits.
+  - Dedicated Service Account (`milton-agent-sa`) with Cloud Logging & Cloud Trace roles.
+  - GCP Secret Manager secrets (`gemini-api-key`) for secure credential storage without hardcoded keys.
+
+### Deploying Your Own Milton Instance
+
+Deploy a dedicated Milton instance to GCP using the one-command deployment script:
+
+```bash
+# Deploy to GCP (uses GOOGLE_CLOUD_PROJECT or takes project_id as argument)
+./deploy.sh my-gcp-project-id us-central1 prod
+```
+
+Or execute Terraform manually:
+```bash
+cd terraform
+terraform init
+terraform apply -var="project_id=my-project" -var="region=us-central1"
+```
+
+## GCP Secret Manager Integration
+
+Milton integrates directly with **GCP Secret Manager** via [`app/utils/secret_manager.py`](file:///google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/app/utils/secret_manager.py). At runtime, [`app/config.py`](file:///google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/app/config.py) automatically fetches credentials from GCP Secret Manager, falling back gracefully to environment variables for local development.
+
+## Automated Golden Dataset Evaluation Suite
+
+Milton includes an automated evaluation suite against a benchmark golden dataset ([`tests/eval/datasets/golden_dataset.json`](file:///google/src/cloud/udekel/milton-for-antigravity-project/sandbox/milton_repo/tests/eval/datasets/golden_dataset.json)):
+
+```bash
+# Run standalone golden dataset evaluation
+python3 tests/eval/run_eval.py
+
+# Run unit tests + golden dataset regression suite
+python3 tests/run_tests.py
+```
+
