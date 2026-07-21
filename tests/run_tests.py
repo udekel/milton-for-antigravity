@@ -298,5 +298,51 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
 
 
 
+class TestMiltonHook(unittest.TestCase):
+
+    def test_handle_pre_tool_use_decision(self):
+        payload = {
+            "conversationId": "test-session-hook",
+            "toolCall": {
+                "name": "run_command",
+                "args": {"CommandLine": "whoami"}
+            }
+        }
+        res = handle_pre_tool_use("test-session-hook", payload)
+        self.assertEqual(res["decision"], "allow")
+        self.assertIn("[Milton Rationale]", res["reason"])
+        self.assertNotIn("Tool Target:", res["reason"])
+        self.assertNotIn("Action in progress:", res["reason"])
+
+    def test_milton_hook_main_silent_stderr(self):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from plugins.antigravity.milton_hook import main as hook_main
+
+        sample_input = json.dumps({
+            "conversationId": "test-session-hook-main",
+            "toolCall": {
+                "name": "view_file",
+                "args": {"AbsolutePath": "/tmp/test.txt"}
+            }
+        })
+
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+
+        original_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample_input)
+            with redirect_stdout(captured_stdout), redirect_stderr(captured_stderr):
+                hook_main()
+        finally:
+            sys.stdin = original_stdin
+
+        self.assertEqual(captured_stderr.getvalue(), "")
+        output_json = json.loads(captured_stdout.getvalue())
+        self.assertEqual(output_json["decision"], "allow")
+        self.assertIn("[Milton Rationale]", output_json["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

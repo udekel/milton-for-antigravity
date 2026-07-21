@@ -106,8 +106,50 @@ def extract_mutterings_rationale_from_transcript(transcript_path: str, tool_name
     return f"{thought_str} {tool_str}".strip() if thought_str else tool_str
 
 
+def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
+    """Reads trajectory transcript log file and syncs recent fragments to local Milton server."""
+    if not transcript_path or not os.path.exists(transcript_path):
+        return
+
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            lines = [l.strip() for l in f if l.strip()]
+
+        for line in lines[-10:]:
+            try:
+                entry = json.loads(line)
+                step_type = entry.get("type")
+
+                # Sync intermediate stream of thought / mutterings
+                thinking = entry.get("thinking")
+                if thinking:
+                    http_post(f"/api/v1/session/{session_id}/fragment", {
+                        "type": "muttering",
+                        "content": thinking
+                    })
+
+                content = entry.get("content")
+                if content and not thinking and step_type in ("PLANNER_RESPONSE", "MODEL"):
+                    http_post(f"/api/v1/session/{session_id}/fragment", {
+                        "type": "muttering",
+                        "content": content
+                    })
+
+                for tc in entry.get("tool_calls", []):
+                    if isinstance(tc, dict):
+                        http_post(f"/api/v1/session/{session_id}/fragment", {
+                            "type": "pre_tool_call",
+                            "tool_name": tc.get("name") or tc.get("type", "tool"),
+                            "args": tc.get("args")
+                        })
+            except Exception:
+                continue
+    except Exception as e:
+        log_event(f"Transcript sync error: {e}")
+
+
 def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale, returning decision='ask' for permission-gated tools to defer to user modal."""
+    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale, returning decision='allow' with rationale."""
     tool_call = payload.get("toolCall", {})
     tool_name = tool_call.get("name", "unknown_tool")
     tool_args = tool_call.get("args", {})
@@ -130,15 +172,8 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
 
     reason_text = f"[Milton Rationale]\n{rationale}"
 
-    # Only return decision='ask' for permission-gated / interactive prompt tools
-    # to avoid blocking internal workspace operations (view_file, replace_file_content, etc.)
-    if tool_name in ("run_command", "read_url", "ask_permission", "execute_url"):
-        decision = "ask"
-    else:
-        decision = "allow"
-
     return {
-        "decision": decision,
+        "decision": "allow",
         "reason": reason_text
     }
 
