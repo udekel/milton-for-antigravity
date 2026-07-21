@@ -15,12 +15,22 @@ class SessionStore:
 
 
     def __init__(self, db_path: Optional[str] = None):
+        """Initializes the SessionStore instance.
+
+        Args:
+            db_path: Path to SQLite database file. Defaults to settings.db_path.
+        """
         self.db_path = db_path or settings.db_path
         self._lock = Lock()
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
+        """Establishes a SQLite database connection with row factory configured.
+
+        Returns:
+            Configured sqlite3.Connection object.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn

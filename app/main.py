@@ -88,12 +88,25 @@ async def trace_middleware(request: Request, call_next):
 @fastapi_app.get("/")
 @fastapi_app.get("/api/v1/healthz")
 async def healthz():
+    """Health check endpoint confirming server operational status.
+
+    Returns:
+        Dictionary indicating status, app name, and active server mode.
+    """
     logger.info("Health check processed", extra={"status_code": 200})
     return {"status": "ok", "app": settings.app_name, "server_mode": settings.server_mode}
 
 
 @fastapi_app.post("/api/v1/session/start")
 async def async_start_session(payload: Dict[str, Any]):
+    """Registers a new agent session in the session store.
+
+    Args:
+        payload: JSON request containing optional session_id and workspace_paths.
+
+    Returns:
+        Dictionary containing initialized session_id and status.
+    """
     store = get_session_store()
     sid = await store.async_create_session(
         session_id=payload.get("session_id"),
@@ -103,23 +116,37 @@ async def async_start_session(payload: Dict[str, Any]):
 
 
 def _background_process_fragment(session_id: str, frag: FragmentData):
-    """Background task function to process and index fragments non-blockingly."""
+    """Background task function to process and index fragments non-blockingly.
+
+    Args:
+        session_id: Target session ID.
+        frag: FragmentData object.
+    """
     try:
         store = get_session_store()
         logger.info(f"Background processing fragment for session '{session_id}'", extra={"session_id": session_id})
-        # Background precomputation or analysis can execute here asynchronously
     except Exception as e:
         logger.error(f"Error in background fragment processing: {e}")
 
 
 @fastapi_app.post("/api/v1/session/{session_id}/fragment")
 async def async_add_fragment(session_id: str, payload: Dict[str, Any], background_tasks: BackgroundTasks):
+    """Stores a real-time event fragment and enqueues background processing tasks.
+
+    Args:
+        session_id: Active session identifier.
+        payload: Fragment event payload.
+        background_tasks: FastAPI BackgroundTasks queue context.
+
+    Returns:
+        Dictionary containing fragment_id and total_fragments_stored.
+    """
     store = get_session_store()
     frag = FragmentData.from_dict(payload)
     frag_id = await store.async_add_fragment(session_id, frag)
     total = len(await store.async_get_fragments(session_id))
 
-    if settings.async_background_processing:
+    if settings.async_background_processing and background_tasks:
         background_tasks.add_task(_background_process_fragment, session_id, frag)
 
     return {
@@ -131,7 +158,12 @@ async def async_add_fragment(session_id: str, payload: Dict[str, Any], backgroun
 
 
 def _background_process_turn_batch(session_id: str, turns: List[TurnData]):
-    """Background task function to process and index turn batches non-blockingly."""
+    """Background task function to process and index turn batches non-blockingly.
+
+    Args:
+        session_id: Target session ID.
+        turns: List of TurnData objects.
+    """
     try:
         store = get_session_store()
         logger.info(f"Background processing turn batch for session '{session_id}'", extra={"session_id": session_id})
@@ -141,13 +173,23 @@ def _background_process_turn_batch(session_id: str, turns: List[TurnData]):
 
 @fastapi_app.post("/api/v1/session/{session_id}/turn")
 async def async_add_turn(session_id: str, payload: Dict[str, Any], background_tasks: BackgroundTasks):
+    """Batches and stores historical turn data asynchronously.
+
+    Args:
+        session_id: Active session identifier.
+        payload: Batch turn payload containing turn list.
+        background_tasks: FastAPI BackgroundTasks queue context.
+
+    Returns:
+        Dictionary containing turns_processed and total_turns_stored.
+    """
     store = get_session_store()
     raw_turns = payload.get("turns", [])
     turns = [TurnData.from_dict(t) for t in raw_turns]
     processed = await store.async_add_turn_batch(session_id, turns)
     total = len(await store.async_get_turns(session_id))
 
-    if settings.async_background_processing:
+    if settings.async_background_processing and background_tasks:
         background_tasks.add_task(_background_process_turn_batch, session_id, turns)
 
     return {
@@ -160,6 +202,17 @@ async def async_add_turn(session_id: str, payload: Dict[str, Any], background_ta
 
 @fastapi_app.get("/api/v1/session/{session_id}/summary")
 async def async_get_summary(session_id: str):
+    """Fetches or precomputes trajectory muttering summary for a session.
+
+    Args:
+        session_id: Target session identifier.
+
+    Returns:
+        Dictionary mapping of trajectory summary attributes.
+
+    Raises:
+        HTTPException: 404 error if no session data is found.
+    """
     store = get_session_store()
     turns = await store.async_get_turns(session_id)
     fragments = await store.async_get_fragments(session_id)
