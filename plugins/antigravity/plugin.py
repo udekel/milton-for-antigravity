@@ -105,11 +105,13 @@ class MiltonAntigravityPlugin:
                 res = self._http_get(f"/api/v1/session/{self.session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
                 if res and "explanation" in res:
                     explanation_text = f"[Milton Rationale]\n{res['explanation']}"
-                    return {
-                        "decision": "force_ask",
-                        "reason": explanation_text,
-                        "injected_message": explanation_text
-                    }
+                else:
+                    explanation_text = f"[Milton Rationale (Offline - Could not connect to Milton Server)]\nNeeded to execute tool '{tool_name}' to proceed with task."
+                return {
+                    "decision": "force_ask",
+                    "reason": explanation_text,
+                    "injected_message": explanation_text
+                }
         return None
 
     def on_post_tool_call(self, tool_name: str, tool_output: str, error: Optional[str] = None):
@@ -143,6 +145,14 @@ class MiltonAntigravityPlugin:
                     f"Actions executed: {actions}\n"
                     + "="*65 + "\n"
                 )
+            else:
+                return (
+                    "\n" + "="*65 + "\n"
+                    "[Milton Summary of Mutterings (Offline - Could not connect to Milton Server)]\n"
+                    "Saved session context to local transcript.\n"
+                    + "="*65 + "\n"
+                )
         return None
+
 
 

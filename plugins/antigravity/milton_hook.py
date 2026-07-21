@@ -160,7 +160,7 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
         explanation_text = f"[Milton Rationale]\n{res['explanation']}"
     else:
         rationale = extract_mutterings_rationale_from_transcript(transcript_path, tool_name, tool_args)
-        explanation_text = f"[Milton Rationale]\n{rationale}"
+        explanation_text = f"[Milton Rationale (Offline - Could not connect to Milton Server)]\n{rationale}"
 
     return {
         "decision": "force_ask",
@@ -189,8 +189,8 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
         )
     else:
         summary_text = (
-            "[Milton Summary of Mutterings]\n"
-            "Processed turn mutterings and saved session context."
+            "[Milton Summary of Mutterings (Offline - Could not connect to Milton Server)]\n"
+            "Processed turn mutterings from local transcript log."
         )
 
     return {
@@ -201,6 +201,7 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
         ],
         "terminationBehavior": ""
     }
+
 
 
 
