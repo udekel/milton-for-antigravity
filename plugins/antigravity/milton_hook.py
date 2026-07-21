@@ -164,7 +164,10 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
 
     return {
         "decision": "force_ask",
-        "reason": explanation_text
+        "reason": explanation_text,
+        "message": explanation_text,
+        "injected_message": explanation_text,
+        "user_message": explanation_text
     }
 
 
@@ -199,8 +202,12 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
                 "userMessage": summary_text
             }
         ],
+        "summary": summary_text,
+        "userMessage": summary_text,
+        "message": summary_text,
         "terminationBehavior": ""
     }
+
 
 
 

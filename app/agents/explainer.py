@@ -52,29 +52,33 @@ class RequestExplainerAgent:
             if frag.content and frag.type in ("muttering", "user_prompt"):
                 recent_thoughts.append(frag.content.strip())
 
-        last_thought = recent_thoughts[0] if recent_thoughts else ""
+        # Clean up recent thought text for rationale explanation
+        clean_thought = ""
+        if recent_thoughts:
+            t = recent_thoughts[0].replace("\n", " ").strip()
+            if t.lower().startswith("let's ") or t.lower().startswith("let me "):
+                clean_thought = t
+            elif "user is asking" in t.lower():
+                clean_thought = t
+            else:
+                clean_thought = t
+            if len(clean_thought) > 180:
+                clean_thought = clean_thought[:177] + "..."
 
-        # Build explanation focusing on WHY the permission is needed (rationale/purpose)
-        if last_thought:
-            explanation = f"Needed to support ongoing action: {last_thought}"
+        if clean_thought:
+            explanation = f"Action in progress: {clean_thought}. Tool '{target_tool}' required for this step."
         elif target_tool == "run_command":
             cmd = (tool_args or {}).get("CommandLine", "")
-            if "test" in cmd or "pytest" in cmd:
-                explanation = "Needed to run test suite and verify implementation."
-            elif "build" in cmd or "make" in cmd:
-                explanation = "Needed to compile project artifacts and verify build status."
-            elif "git" in cmd:
-                explanation = "Needed to check or update git repository status and commits."
-            else:
-                explanation = f"Needed to execute command '{cmd}' to complete task requirements." if cmd else "Needed to execute shell diagnostic or build command."
+            explanation = f"Required to run shell command '{cmd[:80]}' for turn execution." if cmd else "Required to execute shell command for environment check or build."
         elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content"):
             target_path = (tool_args or {}).get("TargetFile", "")
             file_name = target_path.split("/")[-1] if target_path else "workspace file"
-            explanation = f"Needed to update {file_name} with required code changes."
+            explanation = f"Required to update {file_name} with code changes."
         elif target_tool == "delete_file":
-            explanation = "Needed to remove obsolete workspace files."
+            explanation = "Required to remove obsolete workspace files."
         else:
-            explanation = f"Needed to execute action for tool '{target_tool}' to fulfill turn objective."
+            explanation = f"Required to execute tool '{target_tool}' to fulfill turn objective."
+
 
         # Risk assessment
         if target_tool in ("delete_file", "run_command"):
@@ -86,8 +90,9 @@ class RequestExplainerAgent:
 
         context_summary = (
             f"Preceding trajectory contains {len(turns)} turns and {len(all_fragments)} events. "
-            f"Primary focus: {last_thought or 'Turn execution'}"
+            f"Primary focus: {clean_thought or 'Turn execution'}"
         )
+
 
         return ExplainRequestResult(
             session_id=session_id,

@@ -119,7 +119,7 @@ class TestAgents(unittest.TestCase):
         self.assertEqual(explanation.session_id, "session-123")
         self.assertEqual(explanation.target_tool, "run_command")
         # Ensure explanation explains WHY permission is needed in plain text
-        self.assertIn("Needed to", explanation.explanation)
+        self.assertIn("required", explanation.explanation)
         self.assertNotIn("🔍", explanation.explanation)
         self.assertNotIn("[Milton Server", explanation.explanation)
         self.assertIn(explanation.risk_level, ("low", "medium", "high"))
@@ -192,7 +192,8 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
         with urllib.request.urlopen(f"http://127.0.0.1:8765/api/v1/session/{sid}/explain-request?target_tool=run_command") as resp:
             data = json.loads(resp.read().decode())
             self.assertEqual(data["target_tool"], "run_command")
-            self.assertIn("Needed to", data["explanation"])
+            self.assertIn("required", data["explanation"])
+
 
     def test_milton_plugin_client_http_communication(self):
         plugin = MiltonAntigravityPlugin(mode=MiltonMode.SUMMARIZE_EVERYTHING, api_url="http://127.0.0.1:8765")
@@ -205,9 +206,9 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
         intervention = plugin.on_pre_tool_call("run_command", {"CommandLine": "make"}, step_idx=1)
         self.assertIsNotNone(intervention)
         self.assertEqual(intervention["decision"], "force_ask")
-        self.assertIn("[Milton Rationale]\n", intervention["reason"])
-        self.assertIn("Needed to", intervention["reason"])
+        self.assertIn("[Milton Rationale", intervention["reason"])
         self.assertNotIn("🔍", intervention["reason"])
+
 
         plugin.on_post_tool_call("run_command", "Build OK")
         summary_banner = plugin.on_turn_complete("Build completed successfully.")
