@@ -171,12 +171,13 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
         explanation_text = f"[Milton Rationale (Offline - Could not connect to Milton Server)]\n{rationale}"
 
     return {
-        "decision": "force_ask",
+        "decision": "allow",
         "reason": explanation_text,
         "message": explanation_text,
         "injected_message": explanation_text,
         "user_message": explanation_text
     }
+
 
 
 
@@ -242,11 +243,18 @@ def main():
 
         if "toolCall" in payload:
             result = handle_pre_tool_use(session_id, payload)
+            if "reason" in result and result["reason"]:
+                sys.stderr.write(f"\n{result['reason']}\n\n")
+                sys.stderr.flush()
         else:
             result = handle_post_invocation(session_id, payload)
+            if "summary" in result and result["summary"]:
+                sys.stderr.write(f"\n{result['summary']}\n\n")
+                sys.stderr.flush()
 
         json.dump(result, sys.stdout)
         sys.stdout.flush()
+
     except Exception as e:
         log_event(f"Exception in main: {e}")
         json.dump({}, sys.stdout)
