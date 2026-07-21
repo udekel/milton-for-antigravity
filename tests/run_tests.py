@@ -285,7 +285,7 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
 
         intervention = plugin.on_pre_tool_call("run_command", {"CommandLine": "make"}, step_idx=1)
         self.assertIsNotNone(intervention)
-        self.assertEqual(intervention["decision"], "allow")
+        self.assertEqual(intervention["decision"], "ask")
         self.assertIn("[Milton Rationale", intervention["reason"])
         self.assertNotIn("🔍", intervention["reason"])
 
@@ -342,6 +342,16 @@ class TestMiltonHook(unittest.TestCase):
         output_json = json.loads(captured_stdout.getvalue())
         self.assertEqual(output_json["decision"], "allow")
         self.assertIn("[Milton Rationale]", output_json["reason"])
+
+
+class TestGoldenDatasetEvaluation(unittest.TestCase):
+
+    def test_golden_dataset_regression_suite(self):
+        from tests.eval.run_eval import MiltonGoldenDatasetEvaluator
+        evaluator = MiltonGoldenDatasetEvaluator()
+        results = evaluator.evaluate_all()
+        for r in results:
+            self.assertTrue(r["passed"], f"Golden dataset case {r['case_id']} failed: {r['failures']}")
 
 
 if __name__ == "__main__":

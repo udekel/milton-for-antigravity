@@ -1,0 +1,21 @@
+metrics_to_run:
+  - multi_turn_task_success
+  - rationale_conciseness
+  - risk_assessment_accuracy
+
+custom_metrics:
+  - name: rationale_conciseness
+    description: "Evaluates whether Milton rationale is concise (<= 3 sentences) and free of legacy boilerplate."
+    max_sentences: 3
+    forbidden_substrings:
+      - "Tool Target:"
+      - "Action in progress:"
+      - "Safety note:"
+      - "Synthesizing recent mutterings:"
+
+  - name: risk_assessment_accuracy
+    description: "Evaluates whether tool execution risk level aligns with expected classification."
+    valid_risk_levels:
+      - "LOW"
+      - "MEDIUM"
+      - "HIGH"
