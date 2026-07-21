@@ -53,7 +53,7 @@ def read_transcript_mutterings(transcript_path: str) -> List[Dict[str, Any]]:
     return mutterings
 
 
-def generate_summary(payload: Dict[str, Any]) -> str:
+def generate_summary(payload: Dict[str, Any], prefix: str = "") -> str:
     """Generates a Milton Mutterings Summary from current trajectory transcript."""
     transcript_path = payload.get("transcriptPath", "")
     mutterings = read_transcript_mutterings(transcript_path)
@@ -72,22 +72,43 @@ def generate_summary(payload: Dict[str, Any]) -> str:
                 recent_tools.append(tc.get("name") or tc.get("type", "tool"))
 
     summary_text = (
-        "\n" + "="*60 + "\n"
+        f"{prefix}\n"
         "📌 [MILTON MUTTERINGS SUMMARY]\n"
         f"• Stream of Thought Turns Processed: {len(mutterings)}\n"
-        f"• Actions Executed: {', '.join(set(recent_tools)) if recent_tools else 'General Reasoning (No tools)'}\n"
+        f"• Actions Executed: {', '.join(set(recent_tools)) if recent_tools else 'General Reasoning'}\n"
     )
     if recent_thoughts:
         summary_text += f"• Latest Monologue: \"{recent_thoughts[-1]}\"\n"
     else:
-        summary_text += "• Latest Monologue: User turn initiated.\n"
+        summary_text += "• Latest Monologue: Analyzing user request...\n"
 
-    summary_text += "="*60 + "\n"
     return summary_text
 
 
+def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fires BEFORE tool execution and BEFORE permission prompt is rendered!"""
+    tool_call = payload.get("toolCall", {})
+    tool_name = tool_call.get("name", "")
+    tool_args = tool_call.get("args", {})
+    log_event(f"Handling PreToolUse hook for tool: {tool_name}")
+
+    summary_context = generate_summary(payload, prefix="🔍 [Milton Rationale before permission prompt]:")
+    
+    reason_msg = (
+        f"{summary_context}\n"
+        f"⚠️ MILTON SAFETY ANALYSIS: Agent requested tool '{tool_name}' with args {tool_args}. "
+        f"Prior mutterings show it intends to inspect workspace/system environment."
+    )
+
+    # Force Ask with explicit reason injection into permission modal
+    return {
+        "decision": "force_ask",
+        "reason": reason_msg
+    }
+
+
 def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires before model invocation. Injects summary as an ephemeral/user message."""
+    """Fires before model invocation."""
     log_event("Handling PreInvocation hook")
     summary_text = generate_summary(payload)
 
@@ -95,51 +116,29 @@ def handle_pre_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         "injectSteps": [
             {
                 "userMessage": summary_text
-            },
-            {
-                "ephemeralMessage": summary_text
             }
         ]
     }
 
 
 def handle_post_invocation(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires after model invocation completes. Injects summary and sets termination behavior."""
+    """Fires after model invocation completes (at turn completion)."""
     log_event("Handling PostInvocation hook")
-    summary_text = generate_summary(payload)
+    summary_text = generate_summary(payload, prefix="🏁 [Milton End-of-Turn Summary]:")
 
     return {
         "injectSteps": [
             {
                 "userMessage": summary_text
-            },
-            {
-                "ephemeralMessage": summary_text
             }
         ],
         "terminationBehavior": ""
     }
 
 
-def handle_pre_tool_use(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires before a tool executes."""
-    tool_call = payload.get("toolCall", {})
-    tool_name = tool_call.get("name", "")
-    log_event(f"Handling PreToolUse hook for tool: {tool_name}")
-
-    if tool_name in ("run_command", "write_file", "ask_permission"):
-        return {
-            "allowTool": True,
-            "reason": f"🔍 [Milton Request Rationale] Tool '{tool_name}' requested. Preceding mutterings analyzed for safety."
-        }
-
-    return {"allowTool": True}
-
-
 def handle_stop(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Fires when turn execution loop terminates."""
     log_event("Handling Stop hook")
-    # Return normal stop allow
     return {}
 
 

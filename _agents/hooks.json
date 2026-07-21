@@ -23,7 +23,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "run_command|write_file",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
