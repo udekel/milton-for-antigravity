@@ -112,9 +112,9 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
     res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
 
     if res and "explanation" in res:
-        explanation_text = res["explanation"]
+        explanation_text = f"[Milton Rationale]\n{res['explanation']}"
     else:
-        explanation_text = f"Permission requested for tool '{tool_name}' to complete turn objective."
+        explanation_text = f"[Milton Rationale]\nPermission requested for tool '{tool_name}' to complete turn objective."
 
     return {
         "decision": "force_ask",
@@ -136,13 +136,13 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
     if res and "human_summary" in res:
         actions = ", ".join(res.get("actions_executed", [])) or "General reasoning"
         summary_text = (
-            "Milton Summary of Mutterings:\n"
+            "[Milton Summary of Mutterings]\n"
             f"{res['human_summary']}\n"
             f"Actions executed: {actions}"
         )
     else:
         summary_text = (
-            "Milton Summary of Mutterings:\n"
+            "[Milton Summary of Mutterings]\n"
             "Processed turn mutterings and saved session context."
         )
 
@@ -154,6 +154,7 @@ def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str
         ],
         "terminationBehavior": ""
     }
+
 
 
 

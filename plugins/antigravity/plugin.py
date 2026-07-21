@@ -104,7 +104,7 @@ class MiltonAntigravityPlugin:
                 encoded_args = urllib.parse.quote(json.dumps(tool_args))
                 res = self._http_get(f"/api/v1/session/{self.session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
                 if res and "explanation" in res:
-                    explanation_text = res["explanation"]
+                    explanation_text = f"[Milton Rationale]\n{res['explanation']}"
                     return {
                         "decision": "force_ask",
                         "reason": explanation_text,
@@ -138,10 +138,11 @@ class MiltonAntigravityPlugin:
                 
                 return (
                     "\n" + "="*65 + "\n"
-                    "Milton Summary of Mutterings:\n"
+                    "[Milton Summary of Mutterings]\n"
                     f"{res['human_summary']}\n"
-                    f"Actions Executed: {actions}\n"
+                    f"Actions executed: {actions}\n"
                     + "="*65 + "\n"
                 )
         return None
+
 

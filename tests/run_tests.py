@@ -205,13 +205,15 @@ class TestLocalHTTPServerAndPlugins(unittest.TestCase):
         intervention = plugin.on_pre_tool_call("run_command", {"CommandLine": "make"}, step_idx=1)
         self.assertIsNotNone(intervention)
         self.assertEqual(intervention["decision"], "force_ask")
+        self.assertIn("[Milton Rationale]\n", intervention["reason"])
         self.assertIn("Needed to", intervention["reason"])
         self.assertNotIn("🔍", intervention["reason"])
 
         plugin.on_post_tool_call("run_command", "Build OK")
         summary_banner = plugin.on_turn_complete("Build completed successfully.")
         self.assertIsNotNone(summary_banner)
-        self.assertIn("Milton Summary of Mutterings", summary_banner)
+        self.assertIn("[Milton Summary of Mutterings]", summary_banner)
+
 
 
 
