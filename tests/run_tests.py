@@ -27,6 +27,8 @@ from app.models.schemas import (
     SummaryResult,
     TurnData,
 )
+from app.router.model_router import ModelRouter, ModelTier
+from app.agents.orchestrator import MiltonOrchestrator, TrajectorySynthesizerAgent, RiskAssessmentAgent
 from app.utils.logger import JSONLogFormatter
 from app.utils.pii_redactor import PIIRedactor
 from app.utils.tracing import generate_trace_id, make_traceparent, parse_traceparent
@@ -39,7 +41,35 @@ from plugins.antigravity.milton_hook import handle_pre_tool_use, handle_post_inv
 
 
 
+class TestModelRouter(unittest.TestCase):
+
+    def test_high_risk_tool_routing(self):
+        tier = ModelRouter.route_explain_request("run_command", trajectory_length=2)
+        self.assertEqual(tier, ModelTier.HIGH_REASONING.value)
+
+    def test_read_only_tool_routing(self):
+        tier = ModelRouter.route_explain_request("view_file", trajectory_length=1)
+        self.assertEqual(tier, ModelTier.FAST_LITE.value)
+
+
+class TestMiltonOrchestrator(unittest.TestCase):
+
+    def test_orchestration_delegation(self):
+        orchestrator = MiltonOrchestrator()
+        result = orchestrator.orchestrate_pre_tool_explanation(
+            session_id="test-session-123",
+            target_tool="run_command",
+            turns=[],
+            fragments=[],
+            tool_args={"CommandLine": "make test"}
+        )
+        self.assertEqual(result.risk.risk_level, "HIGH")
+        self.assertIn("orchestrator", result.selected_models)
+        self.assertIn("HIGH", result.explanation_text)
+
+
 class TestPIIRedactor(unittest.TestCase):
+
 
     def test_email_redaction(self):
         text = "Contact user at john.doe@example.com for support."
@@ -171,7 +201,8 @@ class TestAgents(unittest.TestCase):
         self.assertIn("required", explanation.explanation)
         self.assertNotIn("🔍", explanation.explanation)
         self.assertNotIn("[Milton Server", explanation.explanation)
-        self.assertIn(explanation.risk_level, ("low", "medium", "high"))
+        self.assertIn(explanation.risk_level.lower(), ("low", "medium", "high"))
+
 
 
 class TestLocalHTTPServerAndPlugins(unittest.TestCase):

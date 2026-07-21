@@ -4,20 +4,21 @@ from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.models.schemas import ExplainRequestResult, FragmentData, TurnData
+from app.agents.orchestrator import MiltonOrchestrator
+from app.router.model_router import ModelRouter
+from app.utils.logger import get_json_logger
+from app.utils.pii_redactor import PIIRedactor
 
-logger = logging.getLogger("milton.explainer")
+logger = get_json_logger("milton.explainer")
 
 
 class RequestExplainerAgent:
-    """Permission Request Explainer Agent.
-    
-    Translates preceding stream-of-thought mutterings into a concise, human-readable rationale
-    for why a specific permission or input request is needed.
-    """
+    """Permission Request Explainer Agent powered by MiltonOrchestrator multi-agent supervisor."""
 
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or settings.gemini_api_key
         self.model_name = model_name or settings.gemini_model
+        self.orchestrator = MiltonOrchestrator()
 
     def explain(
         self,
@@ -27,13 +28,21 @@ class RequestExplainerAgent:
         fragments: List[FragmentData],
         tool_args: Optional[Dict[str, Any]] = None
     ) -> ExplainRequestResult:
-        if self.api_key:
-            try:
-                return self._explain_with_gemini(session_id, target_tool, turns, fragments, tool_args)
-            except Exception as e:
-                logger.warning(f"Gemini API call failed: {e}. Falling back to local heuristic explainer.")
+        selected_model = ModelRouter.route_explain_request(target_tool, tool_args, len(fragments))
+        logger.info(f"RequestExplainerAgent routing request via ModelRouter: '{selected_model}'", extra={"session_id": session_id, "tool_name": target_tool})
 
-        return self._explain_heuristic(session_id, target_tool, turns, fragments, tool_args)
+        # Delegate via Multi-Agent Orchestrator
+        orch_res = self.orchestrator.orchestrate_pre_tool_explanation(session_id, target_tool, turns, fragments, tool_args)
+
+        return ExplainRequestResult(
+            session_id=session_id,
+            target_tool=target_tool,
+            explanation=orch_res.explanation_text,
+            preceding_context_summary=orch_res.summary_text,
+            risk_level=orch_res.risk.risk_level
+        )
+
+
 
     def _explain_heuristic(
         self,

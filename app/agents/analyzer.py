@@ -4,29 +4,32 @@ from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.models.schemas import FragmentData, SummaryResult, TurnData
+from app.agents.orchestrator import TrajectorySynthesizerAgent
+from app.router.model_router import ModelRouter
+from app.utils.logger import get_json_logger
+from app.utils.pii_redactor import PIIRedactor
 
-logger = logging.getLogger("milton.analyzer")
+logger = get_json_logger("milton.analyzer")
 
 
 class MutteringAnalyzerAgent:
-    """Muttering Analyzer Agent.
-    
-    Parses and categorizes agent stream-of-thought, tool calls, and output trajectory.
-    Uses Gemini API if available, with a deterministic heuristic fallback for offline local runs.
-    """
+    """Muttering Analyzer Agent with strategic model routing."""
 
     def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
         self.api_key = api_key or settings.gemini_api_key
         self.model_name = model_name or settings.gemini_model
+        self.synthesizer = TrajectorySynthesizerAgent()
 
     def analyze(self, session_id: str, turns: List[TurnData], fragments: List[FragmentData]) -> SummaryResult:
-        if self.api_key:
-            try:
-                return self._analyze_with_gemini(session_id, turns, fragments)
-            except Exception as e:
-                logger.warning(f"Gemini API call failed: {e}. Falling back to local heuristic analyzer.")
+        selected_model = ModelRouter.route_analyzer_request(len(turns), len(fragments))
+        logger.info(f"MutteringAnalyzerAgent routing request via ModelRouter: '{selected_model}'", extra={"session_id": session_id})
 
-        return self._analyze_heuristic(session_id, turns, fragments)
+        synthesis = self.synthesizer.synthesize(session_id, turns, fragments)
+        res = self._analyze_heuristic(session_id, turns, fragments)
+        res.human_summary = f"Summary of Mutterings: {synthesis.overall_goal} | Subtask: {synthesis.current_subtask}"
+        return res
+
+
 
     def _analyze_heuristic(self, session_id: str, turns: List[TurnData], fragments: List[FragmentData]) -> SummaryResult:
         actions_executed = []
