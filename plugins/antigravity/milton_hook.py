@@ -51,6 +51,47 @@ def http_get(path: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def extract_mutterings_rationale_from_transcript(transcript_path: str, tool_name: str, tool_args: Dict[str, Any]) -> str:
+    """Extracts recent thinking from transcript file to produce a meaningful rationale."""
+    recent_thoughts = []
+    if transcript_path and os.path.exists(transcript_path):
+        try:
+            with open(transcript_path, "r", encoding="utf-8") as f:
+                lines = [l.strip() for l in f if l.strip()]
+            for line in reversed(lines[-15:]):
+                entry = json.loads(line)
+                thinking = entry.get("thinking") or (entry.get("content") if entry.get("type") in ("PLANNER_RESPONSE", "MODEL") else None)
+                if thinking and isinstance(thinking, str) and len(thinking.strip()) > 10:
+                    recent_thoughts.append(thinking.strip())
+                    break
+        except Exception as e:
+            log_event(f"Error reading transcript for rationale: {e}")
+
+    if recent_thoughts:
+        thought = recent_thoughts[0].replace("\n", " ")
+        if len(thought) > 200:
+            thought = thought[:197] + "..."
+        return f"Needed to support action: {thought}"
+
+    if tool_name == "run_command":
+        cmd = (tool_args or {}).get("CommandLine", "")
+        if "pytest" in cmd or "test" in cmd:
+            return "Needed to execute test suite and verify implementation."
+        elif "git" in cmd:
+            return "Needed to inspect or update git repository state."
+        elif cmd:
+            return f"Needed to run shell command '{cmd[:80]}' for turn execution."
+        return "Needed to execute shell diagnostic or build command."
+    elif tool_name in ("write_file", "replace_file_content", "multi_replace_file_content"):
+        target = (tool_args or {}).get("TargetFile", "")
+        file_name = target.split("/")[-1] if target else "workspace file"
+        return f"Needed to apply requested code edits to {file_name}."
+    elif tool_name == "delete_file":
+        return "Needed to remove obsolete workspace files."
+    
+    return f"Needed to execute tool '{tool_name}' to proceed with task objective."
+
+
 def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
     """Reads trajectory transcript log file and syncs recent fragments to local Milton server."""
     if not transcript_path or not os.path.exists(transcript_path):
@@ -98,9 +139,13 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
     tool_call = payload.get("toolCall", {})
     tool_name = tool_call.get("name", "")
     tool_args = tool_call.get("args", {})
+    transcript_path = payload.get("transcriptPath", "")
     log_event(f"Handling PreToolUse for tool '{tool_name}' in session '{session_id}'")
 
-    # Send fragment to local server
+    # Sync latest transcript trajectory first
+    sync_transcript_to_milton_server(session_id, transcript_path)
+
+    # Send pre_tool_call fragment to local server
     http_post(f"/api/v1/session/{session_id}/fragment", {
         "type": "pre_tool_call",
         "tool_name": tool_name,
@@ -111,15 +156,17 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
     encoded_args = urllib.parse.quote(json.dumps(tool_args))
     res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={tool_name}&tool_args={encoded_args}")
 
-    if res and "explanation" in res:
+    if res and "explanation" in res and res["explanation"]:
         explanation_text = f"[Milton Rationale]\n{res['explanation']}"
     else:
-        explanation_text = f"[Milton Rationale]\nPermission requested for tool '{tool_name}' to complete turn objective."
+        rationale = extract_mutterings_rationale_from_transcript(transcript_path, tool_name, tool_args)
+        explanation_text = f"[Milton Rationale]\n{rationale}"
 
     return {
         "decision": "force_ask",
         "reason": explanation_text
     }
+
 
 
 def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
