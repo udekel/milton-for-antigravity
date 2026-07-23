@@ -87,23 +87,90 @@ def extract_mutterings_rationale_from_transcript(transcript_path: str, tool_name
             log_event(f"Error reading transcript for rationale: {e}")
 
     thought_str = recent_thoughts[0] if recent_thoughts else ""
-    if len(thought_str) > 150:
-        thought_str = thought_str[:147] + "..."
-    if thought_str and not thought_str.endswith("."):
-        thought_str += "."
 
+    # Format Action X in laymen terms
+    args = tool_args or {}
     if tool_name == "run_command":
-        cmd = (tool_args or {}).get("CommandLine", "")
-        cmd_str = f"Executing shell command `{cmd[:90]}`." if cmd else "Executing shell command."
-        return f"{thought_str} {cmd_str}".strip() if thought_str else cmd_str
-    elif tool_name in ("write_file", "replace_file_content", "multi_replace_file_content", "write_to_file"):
-        target = (tool_args or {}).get("TargetFile", "")
-        file_name = target.split("/")[-1] if target else "workspace file"
-        mod_str = f"Applying code modifications to {file_name}."
-        return f"{thought_str} {mod_str}".strip() if thought_str else mod_str
+        cmd = (args.get("CommandLine") or "").strip()
+        cmd_low = cmd.lower()
+        if cmd_low.startswith("python") or "python3" in cmd_low:
+            action = "run a python command"
+        elif cmd_low.startswith("pytest"):
+            action = "run a pytest test command"
+        elif cmd_low.startswith("git"):
+            action = "run a git version control command"
+        elif cmd_low.startswith("gcloud"):
+            action = "run a Google Cloud CLI command"
+        elif cmd_low.startswith("make"):
+            action = "run a build command"
+        elif cmd_low.startswith("pip"):
+            action = "run a package installation command"
+        elif cmd:
+            first_word = cmd.split()[0].split("/")[-1]
+            action = f"run a '{first_word}' shell command"
+        else:
+            action = "run a shell command"
+    elif tool_name in ("write_file", "write_to_file", "replace_file_content", "multi_replace_file_content"):
+        target = args.get("TargetFile", "")
+        fname = target.split("/")[-1] if target else "workspace file"
+        action = f"modify file '{fname}'"
+    elif tool_name in ("read_url", "execute_url"):
+        url = args.get("Url", "")
+        domain = url.split("//")[-1].split("/")[0] if url else ""
+        action = f"fetch remote page from '{domain}'" if domain else "access remote URL"
+    elif tool_name == "delete_file":
+        action = "remove a workspace file"
+    else:
+        action = f"execute tool '{tool_name}'"
 
-    tool_str = f"Executing tool '{tool_name}'."
-    return f"{thought_str} {tool_str}".strip() if thought_str else tool_str
+    # Format Purpose Y in laymen terms
+    if thought_str:
+        t = thought_str.strip().replace("\n", " ")
+        prefixes = [
+            "the user wants to", "the user requested", "the user says:",
+            "i will", "i need to", "i am going to", "let's", "let me",
+            "i want to", "we need to", "i am", "need to"
+        ]
+        for prefix in prefixes:
+            if t.lower().startswith(prefix):
+                t = t[len(prefix):].strip()
+                break
+
+        if t:
+            t = t[0].lower() + t[1:]
+
+        t = t.rstrip(".")
+        words = t.split()
+        if len(words) > 12:
+            t = " ".join(words[:12])
+
+        ing_map = {
+            "analyzing": "analyze",
+            "checking": "check",
+            "updating": "update",
+            "installing": "install",
+            "running": "run",
+            "modifying": "modify",
+            "fetching": "fetch",
+            "processing": "process",
+            "executing": "execute",
+            "verifying": "verify",
+            "searching": "search",
+            "inspecting": "inspect",
+        }
+        words = t.split()
+        if words and words[0].lower() in ing_map:
+            words[0] = ing_map[words[0].lower()]
+            t = " ".join(words)
+
+        if t.startswith("to "):
+            purpose = t[3:]
+        else:
+            purpose = t
+    else:
+        purpose = "proceed with the active task"
+
+    return f"The agent needs to {action} in order to {purpose}."
 
 
 def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
@@ -149,7 +216,7 @@ def sync_transcript_to_milton_server(session_id: str, transcript_path: str):
 
 
 def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale, returning decision='allow' with rationale."""
+    """Fires BEFORE tool execution. Queries Milton server or local transcript for rationale and summary of mutterings."""
     tool_call = payload.get("toolCall", {})
     tool_name = tool_call.get("name", "unknown_tool")
     tool_args = tool_call.get("args", {})
@@ -162,7 +229,8 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
 
     # Attempt to fetch explanation rationale from local Milton server
     encoded_tool = urllib.parse.quote(tool_name)
-    res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={encoded_tool}")
+    encoded_args = urllib.parse.quote(json.dumps(tool_args))
+    res = http_get(f"/api/v1/session/{session_id}/explain-request?target_tool={encoded_tool}&tool_args={encoded_args}")
 
     if res and "explanation" in res:
         rationale = res["explanation"]
@@ -181,6 +249,75 @@ def handle_pre_tool_use(session_id: str, payload: Dict[str, Any]) -> Dict[str, A
         "decision": decision,
         "reason": reason_text
     }
+
+
+def handle_post_invocation(session_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Fires at turn completion or post-tool execution. Fetches server-generated summary and injects into UI."""
+    log_event(f"Handling PostInvocation/PostToolUse for session '{session_id}'")
+    transcript_path = payload.get("transcriptPath", "")
+
+    # Sync latest trajectory to local Milton server
+    sync_transcript_to_milton_server(session_id, transcript_path)
+
+    # Fetch summary from Milton server
+    res = http_get(f"/api/v1/session/{session_id}/summary")
+
+    if res and "human_summary" in res:
+        actions = ", ".join(res.get("actions_executed", [])) or "General reasoning"
+        summary_text = (
+            "[Milton Summary of Mutterings]\n"
+            f"{res['human_summary']}\n"
+            f"Actions executed: {actions}"
+        )
+    else:
+        summary_text = (
+            "[Milton Summary of Mutterings (Offline - Could not connect to Milton Server)]\n"
+            "Processed turn mutterings from local transcript log."
+        )
+
+    return {
+        "injectSteps": [
+            {
+                "userMessage": summary_text
+            },
+            {
+                "ephemeralMessage": summary_text
+            }
+        ],
+        "summary": summary_text,
+        "userMessage": summary_text,
+        "message": summary_text,
+        "terminationBehavior": ""
+    }
+
+
+def main():
+    try:
+        input_data = sys.stdin.read()
+        log_event(f"Milton Hook Called. Input length: {len(input_data)}")
+
+        if not input_data:
+            json.dump({}, sys.stdout)
+            return
+
+        payload = json.loads(input_data)
+        session_id = payload.get("conversationId") or payload.get("common", {}).get("conversationId") or "session-default"
+
+        # Ensure session is initialized on local Milton server
+        http_post("/api/v1/session/start", {"session_id": session_id})
+
+        # PreToolUse has 'toolCall' and no 'toolResponse'
+        if "toolCall" in payload and "toolResponse" not in payload:
+            result = handle_pre_tool_use(session_id, payload)
+        else:
+            result = handle_post_invocation(session_id, payload)
+
+        json.dump(result, sys.stdout)
+        sys.stdout.flush()
+
+    except Exception as e:
+        log_event(f"Exception in main: {e}")
+        json.dump({}, sys.stdout)
 
 
 

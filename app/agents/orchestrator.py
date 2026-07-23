@@ -208,26 +208,90 @@ class MiltonOrchestrator:
         selected_model = ModelRouter.route_explain_request(target_tool, tool_args, len(fragments))
 
         subtask = synthesis.current_subtask.strip()
-        if subtask and not subtask.endswith("."):
-            subtask += "."
 
+        # Format Action X in laymen terms
+        args = tool_args or {}
         if target_tool == "run_command":
-            cmd = (tool_args or {}).get("CommandLine", "")
-            action_desc = f"Executing shell command `{cmd[:100]}`." if cmd else "Executing shell command."
-        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content", "write_to_file"):
-            target_path = (tool_args or {}).get("TargetFile", "")
+            cmd = (args.get("CommandLine") or "").strip()
+            cmd_low = cmd.lower()
+            if cmd_low.startswith("python") or "python3" in cmd_low:
+                action = "run a python command"
+            elif cmd_low.startswith("pytest"):
+                action = "run a pytest test command"
+            elif cmd_low.startswith("git"):
+                action = "run a git version control command"
+            elif cmd_low.startswith("gcloud"):
+                action = "run a Google Cloud CLI command"
+            elif cmd_low.startswith("make"):
+                action = "run a build command"
+            elif cmd_low.startswith("pip"):
+                action = "run a package installation command"
+            elif cmd:
+                first_word = cmd.split()[0].split("/")[-1]
+                action = f"run a '{first_word}' shell command"
+            else:
+                action = "run a shell command"
+        elif target_tool in ("write_file", "write_to_file", "replace_file_content", "multi_replace_file_content"):
+            target_path = args.get("TargetFile", "")
             file_name = target_path.split("/")[-1] if target_path else "workspace file"
-            action_desc = f"Applying code modifications to {file_name}."
+            action = f"modify file '{file_name}'"
+        elif target_tool in ("read_url", "execute_url"):
+            url = args.get("Url", "")
+            domain = url.split("//")[-1].split("/")[0] if url else ""
+            action = f"fetch remote page from '{domain}'" if domain else "access remote URL"
         elif target_tool == "delete_file":
-            action_desc = "Removing workspace file."
+            action = "remove a workspace file"
         else:
-            action_desc = f"Executing tool '{target_tool}'."
+            action = f"execute tool '{target_tool}'"
 
+        # Format Purpose Y in laymen terms
         if subtask:
-            explanation_text = f"{subtask} {action_desc}"
-        else:
-            explanation_text = action_desc
+            t = subtask
+            prefixes = [
+                "the user wants to", "the user requested", "the user says:",
+                "i will", "i need to", "i am going to", "let's", "let me",
+                "i want to", "we need to", "i am", "need to"
+            ]
+            for prefix in prefixes:
+                if t.lower().startswith(prefix):
+                    t = t[len(prefix):].strip()
+                    break
 
+            if t:
+                t = t[0].lower() + t[1:]
+
+            t = t.rstrip(".")
+            words = t.split()
+            if len(words) > 12:
+                t = " ".join(words[:12])
+
+            ing_map = {
+                "analyzing": "analyze",
+                "checking": "check",
+                "updating": "update",
+                "installing": "install",
+                "running": "run",
+                "modifying": "modify",
+                "fetching": "fetch",
+                "processing": "process",
+                "executing": "execute",
+                "verifying": "verify",
+                "searching": "search",
+                "inspecting": "inspect",
+            }
+            words = t.split()
+            if words and words[0].lower() in ing_map:
+                words[0] = ing_map[words[0].lower()]
+                t = " ".join(words)
+
+            if t.startswith("to "):
+                purpose = t[3:]
+            else:
+                purpose = t
+        else:
+            purpose = "proceed with the active task"
+
+        explanation_text = f"The agent needs to {action} in order to {purpose}."
         explanation_text = PIIRedactor.redact_text(explanation_text)
 
         summary_text = (

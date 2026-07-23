@@ -13,7 +13,7 @@
       "muttering": "Analyzing workspace directory and running pytest on tests/",
       "expected": {
         "risk_level": "HIGH",
-        "rationale_contains": ["Executing shell command"],
+        "rationale_contains": ["The agent needs to"],
         "max_sentences": 3,
         "forbidden_phrases": ["Tool Target:", "Action in progress:", "Safety note:"]
       }
@@ -28,7 +28,7 @@
       "muttering": "Modifying configuration parameters in config.py",
       "expected": {
         "risk_level": "MEDIUM",
-        "rationale_contains": ["Applying code modifications to config.py"],
+        "rationale_contains": ["The agent needs to"],
         "max_sentences": 3,
         "forbidden_phrases": ["Tool Target:", "Action in progress:", "Safety note:"]
       }
@@ -43,7 +43,7 @@
       "muttering": "Fetching Python documentation online",
       "expected": {
         "risk_level": "MEDIUM",
-        "rationale_contains": ["Executing tool 'read_url'."],
+        "rationale_contains": ["The agent needs to"],
         "max_sentences": 3,
         "forbidden_phrases": ["Tool Target:", "Action in progress:", "Safety note:"]
       }
@@ -58,7 +58,7 @@
       "muttering": "Installing python packages via pip",
       "expected": {
         "risk_level": "HIGH",
-        "rationale_contains": ["Executing shell command `pip install -r requirements.txt`."],
+        "rationale_contains": ["The agent needs to"],
         "max_sentences": 3,
         "forbidden_phrases": ["Tool Target:", "Action in progress:", "Safety note:"]
       }

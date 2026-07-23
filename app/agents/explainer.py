@@ -69,13 +69,34 @@ class RequestExplainerAgent:
             session_id, target_tool, turns, fragments, tool_args
         )
 
-        return ExplainRequestResult(
+        res = ExplainRequestResult(
             session_id=session_id,
             target_tool=target_tool,
             explanation=orch_res.explanation_text,
             preceding_context_summary=orch_res.summary_text,
             risk_level=orch_res.risk.risk_level
         )
+
+        mutterings = [
+            (f.content if hasattr(f, "content") else f.get("content"))
+            for f in fragments
+            if (getattr(f, "type", None) == "muttering" or (isinstance(f, dict) and f.get("type") == "muttering"))
+        ]
+        logger.info(
+            f"Explanation phase generated | "
+            f"Tool: '{target_tool}' | "
+            f"Args: {tool_args} | "
+            f"Input Mutterings ({len(mutterings)}): {mutterings} | "
+            f"Explanation Output: '{res.explanation}' | "
+            f"Risk: '{res.risk_level}'",
+            extra={
+                "session_id": session_id,
+                "tool_name": target_tool,
+                "event_type": "explanation_phase"
+            }
+        )
+
+        return res
 
     def _explain_heuristic(
         self,
@@ -113,21 +134,89 @@ class RequestExplainerAgent:
                 t = t[:177] + "..."
             clean_thought = t
 
-        if clean_thought and not clean_thought.endswith("."):
-            clean_thought += "."
-
+        # Format Action X in laymen terms
+        args = tool_args or {}
         if target_tool == "run_command":
-            cmd = (tool_args or {}).get("CommandLine", "")
-            cmd_desc = f"Executing shell command `{cmd[:80]}`." if cmd else "Executing shell command."
-            explanation = f"{clean_thought} {cmd_desc}".strip() if clean_thought else cmd_desc
-        elif target_tool in ("write_file", "replace_file_content", "multi_replace_file_content", "write_to_file"):
-            target_path = (tool_args or {}).get("TargetFile", "")
+            cmd = (args.get("CommandLine") or "").strip()
+            cmd_low = cmd.lower()
+            if cmd_low.startswith("python") or "python3" in cmd_low:
+                action = "run a python command"
+            elif cmd_low.startswith("pytest"):
+                action = "run a pytest test command"
+            elif cmd_low.startswith("git"):
+                action = "run a git version control command"
+            elif cmd_low.startswith("gcloud"):
+                action = "run a Google Cloud CLI command"
+            elif cmd_low.startswith("make"):
+                action = "run a build command"
+            elif cmd_low.startswith("pip"):
+                action = "run a package installation command"
+            elif cmd:
+                first_word = cmd.split()[0].split("/")[-1]
+                action = f"run a '{first_word}' shell command"
+            else:
+                action = "run a shell command"
+        elif target_tool in ("write_file", "write_to_file", "replace_file_content", "multi_replace_file_content"):
+            target_path = args.get("TargetFile", "")
             file_name = target_path.split("/")[-1] if target_path else "workspace file"
-            mod_desc = f"Applying code modifications to {file_name}."
-            explanation = f"{clean_thought} {mod_desc}".strip() if clean_thought else mod_desc
+            action = f"modify file '{file_name}'"
+        elif target_tool in ("read_url", "execute_url"):
+            url = args.get("Url", "")
+            domain = url.split("//")[-1].split("/")[0] if url else ""
+            action = f"fetch remote page from '{domain}'" if domain else "access remote URL"
+        elif target_tool == "delete_file":
+            action = "remove a workspace file"
         else:
-            tool_desc = f"Executing tool '{target_tool}'."
-            explanation = f"{clean_thought} {tool_desc}".strip() if clean_thought else tool_desc
+            action = f"execute tool '{target_tool}'"
+
+        # Format Purpose Y in laymen terms
+        if clean_thought:
+            t = clean_thought.replace("\n", " ")
+            prefixes = [
+                "the user wants to", "the user requested", "the user says:",
+                "i will", "i need to", "i am going to", "let's", "let me",
+                "i want to", "we need to", "i am", "need to"
+            ]
+            for prefix in prefixes:
+                if t.lower().startswith(prefix):
+                    t = t[len(prefix):].strip()
+                    break
+
+            if t:
+                t = t[0].lower() + t[1:]
+
+            t = t.rstrip(".")
+            words = t.split()
+            if len(words) > 12:
+                t = " ".join(words[:12])
+
+            ing_map = {
+                "analyzing": "analyze",
+                "checking": "check",
+                "updating": "update",
+                "installing": "install",
+                "running": "run",
+                "modifying": "modify",
+                "fetching": "fetch",
+                "processing": "process",
+                "executing": "execute",
+                "verifying": "verify",
+                "searching": "search",
+                "inspecting": "inspect",
+            }
+            words = t.split()
+            if words and words[0].lower() in ing_map:
+                words[0] = ing_map[words[0].lower()]
+                t = " ".join(words)
+
+            if t.startswith("to "):
+                purpose = t[3:]
+            else:
+                purpose = t
+        else:
+            purpose = "proceed with the active task"
+
+        explanation = f"The agent needs to {action} in order to {purpose}."
 
         if target_tool in ("delete_file", "run_command"):
             risk_level = "HIGH"
@@ -175,9 +264,15 @@ class RequestExplainerAgent:
         client = genai.Client(api_key=self.api_key)
 
         prompt = (
-            "You are Milton. Explain EXCLUSIVELY WHY a coding agent needs this permission request based on its intermediate thoughts and goal.\n"
-            "Do NOT restate what tool or arguments are being executed.\n"
-            "Provide a concise 1-3 sentence explanation.\n\n"
+            "You are Milton. Generate a concise, plain-English explanation for a human user reviewing a permission request.\n"
+            "STRICT LAYMEN FORMAT MANDATE:\n"
+            "Your output explanation MUST strictly follow this exact template format:\n"
+            "'The agent needs to [action in laymen terms] in order to [short distilled purpose in laymen terms].'\n\n"
+            "RULES:\n"
+            "1. Do NOT quote long raw bash commands or verbatim code blocks.\n"
+            "2. Do NOT quote raw stream-of-thought mutterings verbatim.\n"
+            "3. Summarize the tool action in simple laymen terms (e.g. 'run a python command', 'modify file config.py', 'access remote documentation').\n"
+            "4. Summarize the intent in 5-10 words in laymen terms (e.g. 'check for the presence of a required directory').\n\n"
             f"Target Tool: {target_tool}\n"
             f"Tool Arguments: {tool_args}\n"
             f"Preceding Turns: {[t.to_dict() for t in turns[-3:]]}\n"
